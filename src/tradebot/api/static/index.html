@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Daemon Control</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap");
+
+      :root {
+        --bg-1: #0b1022;
+        --bg-2: #101a3a;
+        --card: rgba(255, 255, 255, 0.08);
+        --card-border: rgba(255, 255, 255, 0.12);
+        --text: #e8ecf8;
+        --muted: #b6c0de;
+        --accent: #ff6b3d;
+        --accent-2: #3dd6ff;
+        --ok: #4ee39a;
+        --warn: #ffb454;
+        --err: #ff5c7a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Space Grotesk", system-ui, sans-serif;
+        color: var(--text);
+        background: radial-gradient(1200px 800px at 10% 10%, #1d2a5c 0%, rgba(0, 0, 0, 0) 60%),
+          radial-gradient(900px 600px at 90% 20%, #2a1948 0%, rgba(0, 0, 0, 0) 55%),
+          linear-gradient(160deg, var(--bg-1), var(--bg-2));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+      }
+
+      .shell {
+        width: min(900px, 100%);
+        display: grid;
+        gap: 20px;
+      }
+
+      .title {
+        font-size: clamp(28px, 3vw, 40px);
+        font-weight: 700;
+        letter-spacing: 0.5px;
+      }
+
+      .subtitle {
+        color: var(--muted);
+        margin-top: 6px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        border-radius: 16px;
+        padding: 22px;
+        backdrop-filter: blur(12px);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 18px;
+        align-items: center;
+      }
+
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .status-dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--warn);
+        box-shadow: 0 0 12px rgba(255, 180, 84, 0.6);
+      }
+
+      .status.running .status-dot {
+        background: var(--ok);
+        box-shadow: 0 0 12px rgba(78, 227, 154, 0.6);
+      }
+
+      .status.stopped .status-dot {
+        background: var(--err);
+        box-shadow: 0 0 12px rgba(255, 92, 122, 0.6);
+      }
+
+      .status-label {
+        font-size: 22px;
+        font-weight: 700;
+      }
+
+      .pid {
+        font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .controls {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: 0;
+        padding: 12px 18px;
+        border-radius: 12px;
+        font-weight: 600;
+        font-size: 15px;
+        cursor: pointer;
+        transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      button.primary {
+        background: linear-gradient(130deg, var(--accent), #ff8a3d);
+        color: #1a0b06;
+        box-shadow: 0 10px 20px rgba(255, 107, 61, 0.35);
+      }
+
+      button.secondary {
+        background: linear-gradient(130deg, #fef3, var(--accent-2));
+        color: #0c1a2a;
+        box-shadow: 0 10px 20px rgba(61, 214, 255, 0.25);
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        box-shadow: none;
+        transform: none;
+      }
+
+      button:not(:disabled):hover {
+        transform: translateY(-1px);
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .field label {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .field input {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 10px;
+        padding: 10px 12px;
+        color: var(--text);
+        font-size: 14px;
+        font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+      }
+
+      .feedback {
+        min-height: 22px;
+        font-size: 14px;
+      }
+
+      .feedback.ok {
+        color: var(--ok);
+      }
+
+      .feedback.err {
+        color: var(--err);
+      }
+
+      .meta {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 10px;
+      }
+
+      .nav {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .nav-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        text-decoration: none;
+        color: var(--text);
+        border: 1px solid var(--card-border);
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        padding: 8px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        transition: transform 0.15s ease, background 0.15s ease;
+      }
+
+      .nav-link:hover {
+        transform: translateY(-1px);
+        background: rgba(255, 255, 255, 0.15);
+      }
+
+      .badge {
+        font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div>
+        <div class="title">Daemon Control</div>
+        <div class="subtitle">Etat temps reel et actions Start/Stop</div>
+      </div>
+
+      <div class="nav">
+        <a class="nav-link" href="/chart">Ouvrir la page Chart</a>
+      </div>
+
+      <div class="card grid">
+        <div class="status stopped" id="statusBox">
+          <div class="status-dot"></div>
+          <div>
+            <div class="status-label" id="statusLabel">Stopped</div>
+            <div class="pid" id="pidLabel">PID: -</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button class="primary" id="startBtn">Demarrer</button>
+          <button class="secondary" id="stopBtn">Stopper</button>
+        </div>
+
+        <div class="field">
+          <label for="userInput">Utilisateur</label>
+          <input id="userInput" placeholder="ex: alice" />
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="feedback" id="feedback"></div>
+        <div class="meta">
+          <div>Refresh: <span class="badge" id="refreshBadge">1.0s</span></div>
+          <div>Dernier update: <span class="badge" id="lastUpdate">-</span></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const statusBox = document.getElementById("statusBox");
+      const statusLabel = document.getElementById("statusLabel");
+      const pidLabel = document.getElementById("pidLabel");
+      const startBtn = document.getElementById("startBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const feedback = document.getElementById("feedback");
+      const userInput = document.getElementById("userInput");
+      const lastUpdate = document.getElementById("lastUpdate");
+      const refreshBadge = document.getElementById("refreshBadge");
+
+      const REFRESH_MS = 1000;
+      refreshBadge.textContent = (REFRESH_MS / 1000).toFixed(1) + "s";
+
+      function setFeedback(message, kind) {
+        feedback.textContent = message || "";
+        feedback.className = "feedback" + (kind ? " " + kind : "");
+      }
+
+      function headers() {
+        const h = {};
+        const user = userInput.value.trim();
+        if (user) {
+          h["X-User"] = user;
+        }
+        return h;
+      }
+
+      function applyStatus(status, pid) {
+        statusBox.classList.remove("running", "stopped");
+        if (status === "running") {
+          statusBox.classList.add("running");
+          statusLabel.textContent = "Running";
+          startBtn.disabled = true;
+          stopBtn.disabled = false;
+        } else if (status === "stopped") {
+          statusBox.classList.add("stopped");
+          statusLabel.textContent = "Stopped";
+          startBtn.disabled = false;
+          stopBtn.disabled = true;
+        } else {
+          statusLabel.textContent = status || "Unknown";
+          startBtn.disabled = false;
+          stopBtn.disabled = false;
+        }
+        pidLabel.textContent = "PID: " + (pid ?? "-");
+      }
+
+      async function fetchStatus(silent) {
+        try {
+          const res = await fetch("/daemon/status", { headers: headers() });
+          const payload = await res.json();
+          if (!payload.ok) {
+            throw new Error(payload.error?.message || "Erreur status");
+          }
+          applyStatus(payload.data.status, payload.data.pid);
+          lastUpdate.textContent = new Date().toLocaleTimeString();
+          if (!silent) {
+            setFeedback("Etat mis a jour", "ok");
+          }
+        } catch (err) {
+          setFeedback(err.message, "err");
+        }
+      }
+
+      async function action(endpoint, successMessage) {
+        setFeedback("En cours...", "");
+        try {
+          const res = await fetch(endpoint, { method: "POST", headers: headers() });
+          const payload = await res.json();
+          if (!payload.ok) {
+            throw new Error(payload.error?.message || "Erreur action");
+          }
+          applyStatus(payload.data.status, payload.data.pid);
+          setFeedback(successMessage, "ok");
+          lastUpdate.textContent = new Date().toLocaleTimeString();
+        } catch (err) {
+          setFeedback(err.message, "err");
+        }
+      }
+
+      startBtn.addEventListener("click", () => action("/daemon/start", "Daemon demarre"));
+      stopBtn.addEventListener("click", () => action("/daemon/stop", "Daemon stoppe"));
+
+      fetchStatus(true);
+      setInterval(() => fetchStatus(true), REFRESH_MS);
+    </script>
+  </body>
+</html>

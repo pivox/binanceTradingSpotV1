@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  secrets_check:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Binance secrets
+        id: secrets_check
+        env:
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+        run: |
+          if [ -z "${BINANCE_API_KEY}" ] || [ -z "${BINANCE_API_SECRET}" ]; then
+            echo "error=Missing required Binance secrets" >> "${GITHUB_OUTPUT}"
+            echo "Missing required Binance secrets"
+            exit 1
+          fi
+      - name: Notify Slack on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL not set; skipping alert."
+            exit 0
+          fi
+          error_summary="${{ steps.secrets_check.outputs.error }}"
+          if [ -z "${error_summary}" ]; then
+            error_summary="Secret check failed"
+          fi
+          MSG=$(cat <<EOF
+CI failed.
+workflow=${{ github.workflow }}
+run_id=${{ github.run_id }}
+job=${{ github.job }}
+ref=${{ github.ref }}
+error_summary=${error_summary}
+url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+EOF
+          )
+          export MSG
+          payload=$(python - <<'PY'
+import json
+import os
+print(json.dumps({"text": os.environ["MSG"]}))
+PY
+          )
+          curl -sS -X POST -H "Content-type: application/json" --data "${payload}" "${SLACK_WEBHOOK_URL}"
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "poetry"
+
+      - name: Install Poetry
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-ansi
+
+      - name: Prepare artifacts
+        run: mkdir -p artifacts
+
+      - name: Lint
+        id: lint
+        run: |
+          set -o pipefail
+          poetry run ruff check . 2>&1 | tee artifacts/lint.log
+
+      - name: Run tests
+        id: tests
+        run: |
+          set -o pipefail
+          poetry run pytest -q --junitxml=artifacts/pytest.xml 2>&1 | tee artifacts/pytest.log
+
+      - name: Build package
+        id: build
+        run: |
+          set -o pipefail
+          poetry build 2>&1 | tee artifacts/build.log
+
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-and-logs
+          path: |
+            dist/
+            artifacts/
+          retention-days: 7
+
+      - name: Notify Slack on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL not set; skipping alert."
+            exit 0
+          fi
+          failed_step="unknown"
+          if [ "${{ steps.lint.outcome }}" = "failure" ]; then
+            failed_step="lint"
+          fi
+          if [ "${{ steps.tests.outcome }}" = "failure" ]; then
+            failed_step="tests"
+          fi
+          if [ "${{ steps.build.outcome }}" = "failure" ]; then
+            failed_step="build"
+          fi
+
+          error_summary="See logs in run URL"
+          if [ "${failed_step}" = "lint" ] && [ -f artifacts/lint.log ]; then
+            error_summary=$(tail -n 20 artifacts/lint.log)
+          elif [ "${failed_step}" = "tests" ] && [ -f artifacts/pytest.log ]; then
+            error_summary=$(tail -n 20 artifacts/pytest.log)
+          elif [ "${failed_step}" = "build" ] && [ -f artifacts/build.log ]; then
+            error_summary=$(tail -n 20 artifacts/build.log)
+          fi
+
+          MSG=$(cat <<EOF
+CI failed.
+workflow=${{ github.workflow }}
+run_id=${{ github.run_id }}
+job=${{ github.job }}
+ref=${{ github.ref }}
+failed_step=${failed_step}
+error_summary=${error_summary}
+url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+EOF
+          )
+          export MSG
+          payload=$(python - <<'PY'
+import json
+import os
+print(json.dumps({"text": os.environ["MSG"]}))
+PY
+          )
+          curl -sS -X POST -H "Content-type: application/json" --data "${payload}" "${SLACK_WEBHOOK_URL}"

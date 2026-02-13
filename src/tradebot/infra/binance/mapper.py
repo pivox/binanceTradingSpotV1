@@ -1,0 +1,2 @@
+class BinanceMapper:
+    pass

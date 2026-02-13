@@ -1,0 +1,27 @@
+sharding:
+  shard_count: 8
+
+timeframes: ["1m", "5m", "15m", "1h", "4h"]
+
+schedules:
+  candles_tick_sec: 10
+  positions_tick_sec: 5
+  reconcile_klines_min: 30
+  reconcile_orders_min: 10
+  exchangeinfo_daily: "03:10"
+
+strategy:
+  mtf_cascade: ["4h", "1h", "15m", "5m", "1m"]
+  max_open_positions: 10
+  per_trade_quote_budget: 100
+  exit_plan:
+    lots:
+      - id: "A"
+        pct: 0.60
+        rule: { type: "tp_r_multiple", r: 2.0 }
+      - id: "B"
+        pct: 0.30
+        rule: { type: "tp_r_multiple", r: 3.0 }
+      - id: "C"
+        pct: 0.10
+        rule: { type: "trailing", atr_tf: "5m", k: 2.0 }

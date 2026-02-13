@@ -1,0 +1,2 @@
+class CascadeValidateWorkflow:
+    pass

@@ -1,0 +1,2 @@
+class TemporalClientFactory:
+    pass

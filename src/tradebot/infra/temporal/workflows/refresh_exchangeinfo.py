@@ -1,0 +1,2 @@
+class RefreshExchangeInfoWorkflow:
+    pass

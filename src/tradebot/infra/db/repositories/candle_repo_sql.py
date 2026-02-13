@@ -1,0 +1,2 @@
+class CandleRepoSql:
+    pass

@@ -1,0 +1,2 @@
+class BinanceWsUser:
+    pass

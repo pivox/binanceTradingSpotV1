@@ -1,0 +1,2 @@
+class OrderIntentRepoSql:
+    pass

@@ -1,0 +1,2 @@
+class SnapshotRepoSql:
+    pass

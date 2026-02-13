@@ -1,0 +1,159 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  group: deploy-${{ github.ref }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  actions: read
+
+jobs:
+  ci_gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify CI success for commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          WORKFLOW_FILE: ci.yml
+        run: |
+          python - <<'PY'
+import json
+import os
+import sys
+import urllib.request
+
+token = os.environ.get("GITHUB_TOKEN")
+repo = os.environ["REPOSITORY"]
+sha = os.environ["SHA"]
+workflow = os.environ["WORKFLOW_FILE"]
+
+url = (
+    f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs"
+    f"?head_sha={sha}&status=completed&per_page=5"
+)
+req = urllib.request.Request(
+    url,
+    headers={
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "ci-gate",
+    },
+)
+
+with urllib.request.urlopen(req) as resp:
+    data = json.loads(resp.read().decode("utf-8"))
+
+runs = data.get("workflow_runs", [])
+if not runs:
+    print("No CI runs found for this commit.")
+    sys.exit(1)
+
+if not any(run.get("conclusion") == "success" for run in runs):
+    conclusions = ", ".join(run.get("conclusion") or "unknown" for run in runs)
+    print(f"CI not successful for this commit. Conclusions: {conclusions}")
+    sys.exit(1)
+
+print("CI successful for this commit.")
+PY
+
+  deploy:
+    needs: [ci_gate]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=raw,value=${{ inputs.environment }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  notify_failure:
+    needs: [ci_gate, deploy]
+    if: always() && (needs.ci_gate.result == 'failure' || needs.deploy.result == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Slack on failure
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          CI_GATE_RESULT: ${{ needs.ci_gate.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL not set; skipping alert."
+            exit 0
+          fi
+
+          failed_job="unknown"
+          if [ "${CI_GATE_RESULT}" = "failure" ]; then
+            failed_job="ci_gate"
+          elif [ "${DEPLOY_RESULT}" = "failure" ]; then
+            failed_job="deploy"
+          fi
+
+          error_summary="Deploy workflow failed."
+          if [ "${failed_job}" = "ci_gate" ]; then
+            error_summary="CI gate failed: no successful CI run found for this commit."
+          elif [ "${failed_job}" = "deploy" ]; then
+            error_summary="Deploy job failed (image build/push or auth issue)."
+          fi
+
+          MSG=$(cat <<EOF
+Deploy failed.
+workflow=${{ github.workflow }}
+run_id=${{ github.run_id }}
+job=${failed_job}
+ref=${{ github.ref }}
+env=${DEPLOY_ENV}
+error_summary=${error_summary}
+url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+EOF
+          )
+          export MSG
+          payload=$(python - <<'PY'
+import json
+import os
+print(json.dumps({"text": os.environ["MSG"]}))
+PY
+          )
+          curl -sS -X POST -H "Content-type: application/json" --data "${payload}" "${SLACK_WEBHOOK_URL}"

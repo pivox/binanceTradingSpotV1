@@ -81,19 +81,19 @@
 ## Epic 5 - Moteur de validations de signaux MTF configurable (priorite P0)
 
 ### Pourquoi cet epic est restant
-- Le besoin existe fonctionnellement (validation de signaux avant execution), mais n'apparait pas encore comme epic PO explicite dans les US.
-- Le code contient deja des briques (`signal_engine`, `exit_engine`, `services/mtf/cascade`) sans specification produit unifiee de type "catalogue de regles".
-- Demande complementaire exprimee: converger vers un moteur de validations declaratif (inspire d'une approche `validations.regular.yaml`) pour uniformiser les checks.
+- Le besoin existe fonctionnellement (validation de signaux avant exécution), mais n'apparaît pas encore comme epic PO explicite dans les US.
+- Le code contient déjà des briques (`signal_engine`, `exit_engine`, `services/mtf/cascade`) sans spécification produit unifiée de type "catalogue de règles".
+- Demande complémentaire exprimée : converger vers un moteur de validations déclaratif (inspiré d'une approche `validations.regular.yaml`) pour uniformiser les checks.
 
-### Resultat attendu pour fermer l'epic
-- Contrat declaratif de regles de validation (format YAML/JSON versionne) couvrant les controles principaux:
+### Résultat attendu pour fermer l'epic
+- Contrat déclaratif de règles de validation (format YAML/JSON versionné) couvrant les contrôles principaux :
   - confirmations multi-timeframes,
   - seuils indicateurs,
-  - exclusions marche (volatilite/liquidite),
-  - regles de conflit/precedence.
-- Moteur d'evaluation deterministe (ordre de regles stable, resultat reproductible).
-- Explicabilite: pour chaque signal, journal de decision (`passed/failed`, regle, valeur observee, seuil).
-- Tests de non-regression sur scenarios de validation (golden files + cas limites).
+  - exclusions marché (volatilité/liquidité),
+  - règles de conflit/précédence.
+- Moteur d'évaluation déterministe (ordre de règles stable, résultat reproductible).
+- Explicabilité : pour chaque signal, journal de décision (`passed/failed`, règle, valeur observée, seuil).
+- Tests de non-régression sur scénarios de validation (golden files + cas limites).
 
 ### Tickets inclus (a creer/aligner)
 - PO: nouvelle US "Validation des signaux par regles configurables".

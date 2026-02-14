@@ -1,7 +1,7 @@
 ---
 id: T-0021
 title: "Architecture - Blueprint indicateurs live + backfill + API + UI"
-status: TODO
+status: NEEDS_QA
 owner: techlead
 links: ["US-0005", "US-0006", "US-0007", "US-0008"]
 ---
@@ -32,3 +32,7 @@ Les US 0005 a 0008 introduisent un flux bout-en-bout (ingestion -> calcul -> API
 ## Definition of Done
 - Doc mergee et referencee depuis backlog techlead.
 - Risques + hypotheses + questions ouvertes documentes.
+
+## Note Dev
+- Livrable present et versionne: `docs/architecture-indicateurs-live.md`.
+- Le document couvre architecture logique, flux, schema de donnees, observabilite, risques et questions ouvertes.

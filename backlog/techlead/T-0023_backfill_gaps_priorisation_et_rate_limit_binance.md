@@ -1,7 +1,7 @@
 ---
 id: T-0023
 title: "Backend - Backfill des trous avec priorisation et gestion rate-limit Binance"
-status: TODO
+status: NEEDS_QA
 owner: techlead
 links: ["US-0006", "US-0005", "T-0021"]
 ---
@@ -33,3 +33,25 @@ US-0006 exige un rattrapage idempotent des donnees manquantes sans depassement d
 1. Aucun retry infini, chaque echec terminal observable.
 2. Mode "slow" active proche seuil critique weight.
 3. Rattrapage sans doublons, tri strict temporel.
+
+## Journal Dev (2026-02-14)
+### Livre
+- Ajout du modele DB `backfill_jobs` pour persister les jobs de rattrapage:
+  - fenetre cible (`from_open_time_ms`, `to_open_time_ms`), priorite, statut, tentatives, retry/cooldown, dernier statut HTTP.
+- Implementation repository `BackfillRepoSql`:
+  - detection de trous temporels dans `candles` par `(symbol,timeframe)` avec bornes optionnelles.
+  - scheduling idempotent des jobs (contrainte unique par fenetre cible).
+  - selection des jobs prets ordonnee par priorite puis retry time.
+  - politique 429/418 avec retries bornes, backoff exponentiel + jitter deterministe, cooldown explicite, statut terminal.
+  - interpretation des headers `X-MBX-USED-WEIGHT-*` et passage en `rate_mode=slow` proche seuil.
+- Ajout des tests unitaires dans `tests/unit/test_backfill_repo.py`:
+  - detection des gaps, idempotence de scheduling, policies 429/418, terminal failure.
+- Documentation technique ajoutee: `docs/backfill-rate-limit.md`.
+
+## Journal Dev (2026-02-14) - Correctifs QA/MR
+### Corrige
+- B-0011: exclusion explicite des timeframes mensuels (`M`) de `timeframe_to_ms` pour eviter une approximation fixe 30 jours.
+- Comportement attendu: `1M` leve `ValueError("unsupported timeframe")` tant qu'une logique calendaire dediee n'est pas implementee.
+
+### Validation
+- Ajout test non-regression `test_timeframe_to_ms_rejects_calendar_month` dans `tests/unit/test_backfill_repo.py`.

@@ -1,0 +1,73 @@
+openapi: 3.1.0
+info:
+  title: Tradebot Indicators API
+  version: 1.0.0
+paths:
+  /indicators/latest:
+    get:
+      summary: Latest indicator snapshot for a symbol/timeframe
+      parameters:
+        - in: query
+          name: symbol
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Z0-9]{2,20}$'
+        - in: query
+          name: timeframe
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9][0-9]*[mhdwM]$'
+        - in: header
+          name: If-None-Match
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Latest snapshot
+        '304':
+          description: Unchanged payload (conditional cache hit)
+        '400':
+          description: Validation error
+        '404':
+          description: Snapshot not found
+        '500':
+          description: Infrastructure error
+  /indicators/history:
+    get:
+      summary: Historical snapshots ordered by close_time desc with opaque cursor
+      parameters:
+        - in: query
+          name: symbol
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Z0-9]{2,20}$'
+        - in: query
+          name: timeframe
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9][0-9]*[mhdwM]$'
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - in: query
+          name: cursor
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ordered snapshots page
+        '400':
+          description: Validation error
+        '500':
+          description: Infrastructure error

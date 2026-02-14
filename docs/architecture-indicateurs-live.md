@@ -75,7 +75,7 @@ Concevoir une architecture coherente pour realiser US-0005 a US-0008 sans diverg
 - Respect strict des namespaces: `macd`, `bollinger`, `stoch_rsi`, `pivots`.
 - Valeur indisponible en `{status:"unavailable",reason:"warmup|missing_history|not_supported"}`.
 - `payload_json` reste la source canonique flexible; les colonnes numeriques denormalisees sont maintenues pour les filtres/tris performants US-0008.
-- Index recommandes: `(timeframe, close_time desc)`, `(timeframe, rsi)`, `(timeframe, macd_hist)`, et autres indexes btree sur metriques exposees au tri/filtre.
+- Index recommandes: (timeframe, close_time desc), (timeframe, rsi, close_time, symbol), (timeframe, macd_hist, close_time, symbol), et autres indexes btree composites couvrant le tri + tie-break.
 
 ## Strategies techniques clefs
 

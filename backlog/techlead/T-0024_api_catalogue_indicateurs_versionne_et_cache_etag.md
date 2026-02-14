@@ -1,7 +1,7 @@
 ---
 id: T-0024
 title: "API - Catalogue indicateurs versionne, historique curseur et cache ETag"
-status: TODO
+status: NEEDS_QA
 owner: techlead
 links: ["US-0007", "US-0005", "US-0006", "T-0021"]
 ---
@@ -33,3 +33,26 @@ US-0007 impose un contrat API stable/versionne avec representation explicite des
 1. `schema_version` present sur chaque reponse.
 2. Aucun `null` ambigu pour indisponibilite.
 3. p95 endpoint "dernier snapshot" <= 300ms en nominal.
+
+## Journal Dev (2026-02-14)
+### Livre
+- Ajout du modele DB `indicator_snapshots`:
+  - contexte versionne (`schema_version`, `symbol`, `timeframe`, `close_time_ms`, `computed_at_ms`).
+  - payload JSON indicateurs et `etag` stable.
+- Implementation repository `IndicatorRepository`:
+  - upsert snapshot versionne.
+  - lecture "latest snapshot" + ETag.
+  - historique tri `close_time desc` avec pagination par curseur opaque stable.
+- API exposee dans `src/tradebot/api/app.py`:
+  - `GET /indicators/latest` (support `If-None-Match` -> `304`).
+  - `GET /indicators/history` (limit borne + curseur opaque).
+  - erreurs normalisees: `code`, `message`, `categorie`, `action_conseillee`.
+  - `schema_version` present dans les reponses historiques et dans chaque snapshot.
+- Design-first/OpenAPI:
+  - ajout de `docs/openapi-indicators.yaml`.
+  - documentation d'usage `docs/indicators-api.md`.
+- Tests ajoutes `tests/unit/test_indicator_api.py`:
+  - validation 200/304 sur latest avec ETag.
+  - pagination curseur deterministe.
+  - erreur `invalid_cursor` normalisee.
+- Test contrat OpenAPI ajoute: `tests/unit/test_openapi_indicators.py`.

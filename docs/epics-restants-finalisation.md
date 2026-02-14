@@ -142,7 +142,7 @@
 2. **Epic 5** en parallele: cadrer tot le moteur de validation de signaux pour eviter un recablage tardif de l'execution.
 3. **Epic 6** en continu pendant l'implementation (QA continue, pas en fin de projet uniquement).
 4. **Epic 4** ensuite pour finaliser la valeur trader cote interface de screening.
-5. **Epic 7** en continu des epics 1-5 pour valider quantitativement les choix (et en gate pre-release).
+5. **Epic 7** en continu dès les epics 1-5 pour valider quantitativement les choix (et en gate pré-release).
 
 ## Questions ouvertes (a trancher PO/TechLead)
 - Quel niveau de tolerance est accepte pour l'ecart numerique des indicateurs (epsilon par indicateur) ?

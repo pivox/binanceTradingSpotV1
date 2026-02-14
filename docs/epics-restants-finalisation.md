@@ -144,11 +144,11 @@
 4. **Epic 4** ensuite pour finaliser la valeur trader cote interface de screening.
 5. **Epic 7** en continu dès les epics 1-5 pour valider quantitativement les choix (et en gate pré-release).
 
-## Questions ouvertes (a trancher PO/TechLead)
-- Quel niveau de tolerance est accepte pour l'ecart numerique des indicateurs (epsilon par indicateur) ?
-- Quelle politique de versionning API appliquer en cas de changement de formule/metadonnee ?
-- Quelle volumetrie cible officielle du screener (200, 500, 1000 paires) pour verrouiller les NFR front ?
-- Quel format cible pour les regles de validation des signaux (YAML versionne, schema JSON, ou mix) ?
-- Souhaite-t-on plusieurs profils de validation (regular/aggressive/conservative) selectionnables au runtime ?
-- Quels jeux de donnees historiques de reference sont retenus pour les campagnes de backtesting (periode, paires, granularites) ?
-- Quels seuils minimaux de performance/risque definissent un "go" release (ex: max drawdown, Sharpe, taux de trades invalides) ?
+## Questions ouvertes (à trancher PO/TechLead)
+- Quel niveau de tolérance est accepté pour l'écart numérique des indicateurs (epsilon par indicateur) ?
+- Quelle politique de versionning API appliquer en cas de changement de formule/métadonnée ?
+- Quelle volumétrie cible officielle du screener (200, 500, 1000 paires) pour verrouiller les NFR front ?
+- Quel format cible pour les règles de validation des signaux (YAML versionné, schéma JSON, ou mix) ?
+- Souhaite-t-on plusieurs profils de validation (regular/aggressive/conservative) sélectionnables au runtime ?
+- Quels jeux de données historiques de référence sont retenus pour les campagnes de backtesting (période, paires, granularités) ?
+- Quels seuils minimaux de performance/risque définissent un "go" release (ex: max drawdown, Sharpe, taux de trades invalides) ?

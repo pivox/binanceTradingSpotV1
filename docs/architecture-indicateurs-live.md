@@ -67,6 +67,7 @@ Concevoir une architecture coherente pour realiser US-0005 a US-0008 sans diverg
 ### Tables
 - `candles(symbol, timeframe, open_time, close_time, open, high, low, close, volume, is_final, source, updated_at)`
 - `indicator_snapshots(symbol, timeframe, close_time, computed_at, schema_version, payload_json, etag)`
+- `indicator_snapshot_metrics(snapshot_id, symbol, timeframe, close_time, rsi, ema_20, ema_50, sma_20, macd, macd_signal, macd_hist, bollinger_upper, bollinger_mid, bollinger_lower, atr, vwap, adx, stoch_rsi_k, stoch_rsi_d, updated_at)`
 - `indicator_state(symbol, timeframe, state_json, last_close_time, updated_at)` (etat incremental/warmup)
 - `backfill_jobs(id, symbol, timeframe, range_start, range_end, priority, status, attempts, next_retry_at, last_error, created_at, updated_at)`
 - `api_rate_budget(scope, used_weight, window, observed_at)`
@@ -74,6 +75,8 @@ Concevoir une architecture coherente pour realiser US-0005 a US-0008 sans diverg
 ### Contrat payload (US-0007)
 - Respect strict des namespaces: `macd`, `bollinger`, `stoch_rsi`, `pivots`.
 - Valeur indisponible en `{status:"unavailable",reason:"warmup|missing_history|not_supported"}`.
+- `payload_json` reste la source contractuelle API (evolution schema/versionning), mais les champs numeriques critiques pour filtre/tri UI sont projetes en colonnes typées dans `indicator_snapshot_metrics`.
+- Index recommandes pour filtrage/tri: `(timeframe, close_time desc)`, puis indexes composes par indicateur frequemment utilise (ex: `(timeframe, rsi, snapshot_id)` et `(timeframe, macd_hist, snapshot_id)`).
 
 ## Strategies techniques clefs
 
@@ -96,7 +99,9 @@ Concevoir une architecture coherente pour realiser US-0005 a US-0008 sans diverg
 ### API/Cache
 - ETag derive de `(symbol,timeframe,close_time,computed_at,schema_version)`.
 - Reponse 304 si `If-None-Match` egal.
-- Historique par curseur opaque encode (`close_time`,`symbol`,`timeframe`).
+- Pagination keyset: curseur opaque encode `(sort_key_value, snapshot_id)` (+ metadata `sort_by`, `sort_order`).
+- Pour un tri arbitraire (ex: `rsi asc`), la requete SQL applique `ORDER BY rsi ASC, snapshot_id ASC` puis `WHERE (rsi, snapshot_id) > (:last_rsi, :last_snapshot_id)`.
+- `snapshot_id` (ou `(symbol,timeframe,close_time)` si cle composite) sert de tie-breaker stable pour garantir absence de doublons/sauts entre pages.
 
 ### Performance UI
 - Virtualisation pour listes volumineuses.

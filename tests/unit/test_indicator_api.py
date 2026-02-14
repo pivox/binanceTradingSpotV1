@@ -27,17 +27,15 @@ def _build_settings(tmp_path, db_url: str) -> Settings:
     )
 
 
-def _seed_snapshots(db_url: str) -> None:
+def _seed_snapshots(db_url: str, *, count: int = 3) -> None:
     engine = create_engine(db_url, future=True)
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     with session_factory() as session:
         repo = IndicatorRepository(session)
-        for close_time_ms, rsi_value in (
-            (1_000, 45.0),
-            (2_000, 50.0),
-            (3_000, 55.0),
-        ):
+        for index in range(count):
+            close_time_ms = (index + 1) * 1_000
+            rsi_value = 45.0 + (index * 5.0)
             repo.upsert_snapshot(
                 symbol="BTCUSDC",
                 timeframe="1m",
@@ -157,3 +155,54 @@ def test_metrics_endpoint_is_exposed(tmp_path):
         assert "text/plain" in content_type
 
     asyncio.run(_with_app(settings, _case))
+
+
+def test_indicators_history_default_limit_is_clamped_by_configured_max(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'indicator_api.db'}"
+    _seed_snapshots(db_url, count=8)
+    settings = _build_settings(tmp_path, db_url)
+
+    async def _case(app):
+        status, payload, _ = await _call(
+            app, "GET", "/indicators/history?symbol=BTCUSDC&timeframe=1m"
+        )
+        assert status == 200
+        assert payload["ok"] is True
+        items = payload["data"]["items"]
+        assert len(items) == 5
+        assert payload["data"]["next_cursor"] is not None
+
+    asyncio.run(_with_app(settings, _case))
+
+
+def test_upsert_snapshot_recomputes_etag_when_payload_changes(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'indicator_api.db'}"
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    try:
+        with session_factory() as session:
+            repo = IndicatorRepository(session)
+            first = repo.upsert_snapshot(
+                symbol="BTCUSDC",
+                timeframe="1m",
+                close_time_ms=1_000,
+                computed_at_ms=2_000,
+                schema_version="1.0.0",
+                payload={"rsi": {"status": "available", "value": 40}},
+            )
+
+        with session_factory() as session:
+            repo = IndicatorRepository(session)
+            second = repo.upsert_snapshot(
+                symbol="BTCUSDC",
+                timeframe="1m",
+                close_time_ms=1_000,
+                computed_at_ms=2_000,
+                schema_version="1.0.0",
+                payload={"rsi": {"status": "available", "value": 99}},
+            )
+
+        assert first.etag != second.etag
+    finally:
+        engine.dispose()

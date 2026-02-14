@@ -16,7 +16,8 @@ def rsi_series(values: Sequence[float], period: int = 14) -> list[float | None]:
     if period <= 0:
         raise ValueError("period must be > 0")
 
-    if len(values) < period:
+    required_points = period + 1
+    if len(values) < required_points:
         return [None] * len(values)
 
     closes = [float(value) for value in values]
@@ -24,16 +25,16 @@ def rsi_series(values: Sequence[float], period: int = 14) -> list[float | None]:
 
     gains: list[float] = []
     losses: list[float] = []
-    for index in range(1, period):
+    for index in range(1, required_points):
         delta = closes[index] - closes[index - 1]
         gains.append(max(delta, 0.0))
         losses.append(max(-delta, 0.0))
 
     avg_gain = sum(gains) / period
     avg_loss = sum(losses) / period
-    result[period - 1] = _rsi_from_averages(avg_gain, avg_loss)
+    result[period] = _rsi_from_averages(avg_gain, avg_loss)
 
-    for index in range(period, len(closes)):
+    for index in range(required_points, len(closes)):
         delta = closes[index] - closes[index - 1]
         gain = max(delta, 0.0)
         loss = max(-delta, 0.0)

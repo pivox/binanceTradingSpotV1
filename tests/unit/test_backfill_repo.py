@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -9,6 +10,7 @@ from tradebot.infra.db.models import BackfillJob, Base, Candle
 from tradebot.infra.db.repositories.backfill_repo_sql import (
     BackfillRepoSql,
     BackfillRetryPolicy,
+    timeframe_to_ms,
 )
 
 
@@ -189,3 +191,8 @@ def test_terminal_failure_when_attempt_budget_exhausted(tmp_path):
             assert job.status == "FAILED_TERMINAL"
     finally:
         engine.dispose()
+
+
+def test_timeframe_to_ms_rejects_calendar_month() -> None:
+    with pytest.raises(ValueError, match="unsupported timeframe"):
+        timeframe_to_ms("1M")

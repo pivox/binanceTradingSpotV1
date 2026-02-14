@@ -47,3 +47,11 @@ US-0006 exige un rattrapage idempotent des donnees manquantes sans depassement d
 - Ajout des tests unitaires dans `tests/unit/test_backfill_repo.py`:
   - detection des gaps, idempotence de scheduling, policies 429/418, terminal failure.
 - Documentation technique ajoutee: `docs/backfill-rate-limit.md`.
+
+## Journal Dev (2026-02-14) - Correctifs QA/MR
+### Corrige
+- B-0011: exclusion explicite des timeframes mensuels (`M`) de `timeframe_to_ms` pour eviter une approximation fixe 30 jours.
+- Comportement attendu: `1M` leve `ValueError("unsupported timeframe")` tant qu'une logique calendaire dediee n'est pas implementee.
+
+### Validation
+- Ajout test non-regression `test_timeframe_to_ms_rejects_calendar_month` dans `tests/unit/test_backfill_repo.py`.

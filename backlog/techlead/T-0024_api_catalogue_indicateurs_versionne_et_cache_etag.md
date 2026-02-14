@@ -56,3 +56,14 @@ US-0007 impose un contrat API stable/versionne avec representation explicite des
   - pagination curseur deterministe.
   - erreur `invalid_cursor` normalisee.
 - Test contrat OpenAPI ajoute: `tests/unit/test_openapi_indicators.py`.
+
+## Journal Dev (2026-02-14) - Correctifs QA/MR
+### Corrige
+- B-0010: ETag `latest` maintenant sensible au payload (hash inclut representation JSON canonique du payload).
+- MR: `_parse_limit` clamp le `default_limit` avec `max_limit` quand `limit` est absent.
+- MR: `_decode_cursor` capture uniquement les erreurs attendues (`binascii/json/key/type/value`), plus de `except Exception` large.
+- MR: simplification `_request_logger` (correlation_id prise depuis le middleware).
+
+### Validation
+- Ajout test non-regression `test_upsert_snapshot_recomputes_etag_when_payload_changes`.
+- Ajout test non-regression `test_indicators_history_default_limit_is_clamped_by_configured_max`.

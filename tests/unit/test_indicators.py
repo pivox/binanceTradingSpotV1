@@ -6,7 +6,7 @@ from tradebot.services.indicators.atr import atr
 from tradebot.services.indicators.ema import ema
 from tradebot.services.indicators.factory import CandleSample, build_indicator_snapshot
 from tradebot.services.indicators.macd import macd
-from tradebot.services.indicators.rsi import rsi
+from tradebot.services.indicators.rsi import rsi, rsi_series
 
 DAY_MS = 86_400_000
 MINUTE_MS = 60_000
@@ -54,13 +54,22 @@ def test_ema_uses_sma_seed_and_standard_alpha() -> None:
 
 
 def test_rsi_stays_in_expected_bounds() -> None:
-    increasing = [float(value) for value in range(1, 15)]
+    increasing = [float(value) for value in range(1, 16)]
     decreasing = list(reversed(increasing))
-    flat = [10.0] * 14
+    flat = [10.0] * 15
 
     assert rsi(increasing, period=14) == pytest.approx(100.0)
     assert rsi(decreasing, period=14) == pytest.approx(0.0)
     assert rsi(flat, period=14) == pytest.approx(50.0)
+
+
+def test_rsi_requires_period_plus_one_points_for_first_value() -> None:
+    values = [float(value) for value in range(1, 15)]
+    assert all(item is None for item in rsi_series(values, period=14))
+
+    with_first_rsi = rsi_series(values + [15.0], period=14)
+    assert with_first_rsi[13] is None
+    assert with_first_rsi[14] is not None
 
 
 def test_atr_wilder_smoothing() -> None:
@@ -95,6 +104,16 @@ def test_snapshot_marks_warmup_and_missing_history() -> None:
         "reason": "missing_history",
     }
     assert snapshot["vwap"]["status"] == "available"
+
+
+def test_snapshot_keeps_rsi_in_warmup_at_14_candles() -> None:
+    candles = _single_session_candles(14)
+    snapshot = build_indicator_snapshot(
+        symbol="BTCUSDC", timeframe="1m", candles=candles, computed_at=124
+    )
+
+    assert snapshot["rsi"] == {"status": "unavailable", "reason": "warmup"}
+    assert snapshot["atr"]["status"] == "available"
 
 
 def test_snapshot_exposes_available_values_and_pivots() -> None:

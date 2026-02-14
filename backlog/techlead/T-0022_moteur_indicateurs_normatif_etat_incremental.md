@@ -48,3 +48,14 @@ US-0005 impose des formules normatives et un comportement strict sur bougies clo
 - Etat incremental persistant par `(symbol,timeframe)` (`indicator_state` en DB).
 - Recalcul segmentaire automatique depuis la premiere bougie impactee lors des corrections/out-of-order.
 - Branchement du moteur sur le pipeline d'activites/workflows + persistence snapshot en base.
+
+## Journal Dev (2026-02-14) - Correctifs QA/MR
+### Corrige
+- B-0009: correction RSI Wilder warmup (premiere valeur RSI(14) disponible a la 15e bougie, pas a la 14e).
+- Snapshot factory alignee: RSI reste `unavailable/warmup` a 14 closes, ATR reste disponible a partir de 14.
+- Optimisation MR: calcul MACD passe en O(N) via `ema_series` (suppression du recalcul EMA dans une boucle O(N^2)).
+
+### Validation
+- Ajout tests non-regression dans `tests/unit/test_indicators.py`:
+  - warmup RSI off-by-one,
+  - snapshot RSI warmup a 14 candles.

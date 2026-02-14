@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import binascii
 import base64
 from hashlib import sha256
 import json
@@ -42,6 +43,7 @@ class IndicatorRepository:
             close_time_ms=close_time_ms,
             computed_at_ms=computed_at_ms,
             schema_version=schema_version,
+            payload=payload,
         )
 
         if row is None:
@@ -147,9 +149,11 @@ class IndicatorRepository:
         close_time_ms: int,
         computed_at_ms: int,
         schema_version: str,
+        payload: dict[str, Any],
     ) -> str:
+        payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         raw = (
-            f"{symbol}:{timeframe}:{close_time_ms}:{computed_at_ms}:{schema_version}"
+            f"{symbol}:{timeframe}:{close_time_ms}:{computed_at_ms}:{schema_version}:{payload_json}"
         ).encode("utf-8")
         return f'"{sha256(raw).hexdigest()}"'
 
@@ -171,5 +175,11 @@ class IndicatorRepository:
             if close_time_ms < 0 or row_id <= 0:
                 raise ValueError("cursor values out of range")
             return close_time_ms, row_id
-        except Exception as exc:
+        except (
+            binascii.Error,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
             raise InvalidCursorError("invalid cursor") from exc

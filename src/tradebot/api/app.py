@@ -134,7 +134,7 @@ def _parse_limit(
     raw_value: str | None, max_limit: int, *, default_limit: int = CHART_DEFAULT_LIMIT
 ) -> tuple[int | None, str | None]:
     if raw_value is None:
-        return default_limit, None
+        return min(default_limit, max_limit), None
 
     value = raw_value.strip()
     if not value:

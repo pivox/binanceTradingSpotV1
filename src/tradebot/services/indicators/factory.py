@@ -241,11 +241,14 @@ def build_indicator_snapshot(
         "computed_at": computed_at if computed_at is not None else int(time() * 1000),
     }
 
-    if len(closes) >= 14:
+    if len(closes) >= 15:
         snapshot["rsi"] = _available(rsi(closes, period=14))
-        snapshot["atr"] = _available(atr(highs, lows, closes, period=14))
     else:
         snapshot["rsi"] = _unavailable("warmup")
+
+    if len(closes) >= 14:
+        snapshot["atr"] = _available(atr(highs, lows, closes, period=14))
+    else:
         snapshot["atr"] = _unavailable("warmup")
 
     if len(closes) >= 20:

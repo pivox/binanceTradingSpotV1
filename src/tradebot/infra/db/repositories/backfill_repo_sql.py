@@ -19,7 +19,6 @@ def timeframe_to_ms(timeframe: str) -> int:
         "h": 3_600_000,
         "d": 86_400_000,
         "w": 604_800_000,
-        "M": 2_592_000_000,
     }
     if amount <= 0 or unit not in multipliers:
         raise ValueError(f"unsupported timeframe: {timeframe}")

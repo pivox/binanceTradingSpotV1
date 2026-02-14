@@ -7,10 +7,10 @@
 - Demande complementaire prise en compte: inclure explicitement le **moteur de validation des signaux** (regles MTF) dans les epics de finalisation.
 
 ## Constat rapide
-- Les US PO `US-0001` a `US-0008` sont encore marquees `TODO` cote backlog, meme si une partie importante du socle API/UI existe deja.
-- Cote TechLead, l'axe CI/CD historique (TL-09 a TL-15) est largement cloture (`DONE`/`VALIDATED`).
-- Le chantier encore actif est surtout le bloc **indicateurs live** (moteur + backfill + contrat API + UI screener + QA de non-regression).
-- Un second chantier structurant reste a finaliser: **moteur de validations de signaux** configurable par regles (logique MTF/cascade, gouvernance des validations, traçabilite des decisions).
+- Les US PO `US-0001` à `US-0008` sont encore marquées `TODO` côté backlog, même si une partie importante du socle API/UI existe déjà.
+- Côté TechLead, l'axe CI/CD historique (TL-09 à TL-15) est largement clôturé (`DONE`/`VALIDATED`).
+- Le chantier encore actif est surtout le bloc **indicateurs live** (moteur + backfill + contrat API + UI screener + QA de non-régression).
+- Un second chantier structurant reste à finaliser : **moteur de validations de signaux** configurable par règles (logique MTF/cascade, gouvernance des validations, traçabilité des décisions).
 
 ## Epic 1 - Fiabilisation du pipeline indicateurs live (priorite P0)
 

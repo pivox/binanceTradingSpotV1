@@ -76,6 +76,8 @@ US-0007 impose un contrat API stable/versionne avec representation explicite des
   - `GET /metrics`
 - Hardening RBAC: le header utilisateur n'est pris en compte que si `request.remote` appartient a la allowlist `rbac_trusted_proxy_ips`.
 - `updated_at` des modeles DB critiques passe en auto-update (`onupdate=func.now()`).
+- Hardening auth proxy: ajout d'un secret partage (`rbac_proxy_shared_secret`) exige via header `X-RBAC-Proxy-Token` quand RBAC est active.
+- Simplification `_request_logger` alignee sur le middleware (correlation id attendu dans le contexte requete).
 
 ### Validation
 - Ajout test `test_indicators_and_metrics_are_rbac_protected` (controle acces + proxy non fiable refuse).

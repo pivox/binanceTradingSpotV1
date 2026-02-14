@@ -63,3 +63,6 @@ US-0005 impose des formules normatives et un comportement strict sur bougies clo
 ## Journal Dev (2026-02-14) - Clarification MR
 ### Corrige
 - Clarification explicite dans le code ADX: lissage Wilder applique sur des sommes lissees (pas sur des moyennes), pour eviter une mauvaise interpretation de la formule.
+- Ajustement implementation ADX vers forme explicite moyenne Wilder:
+  - seed sur moyenne (`sum(period)/period`)
+  - recurrence `((old * (period-1)) + new) / period`.

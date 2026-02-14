@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from hmac import compare_digest
 from pathlib import Path
 import re
 from time import perf_counter, time
@@ -36,6 +37,7 @@ RBAC_OPERATOR_USERS_KEY = web.AppKey("rbac_operator_users", set[str])
 RBAC_STATUS_ROLES_KEY = web.AppKey("rbac_status_roles", set[str])
 RBAC_USER_HEADER_KEY = web.AppKey("rbac_user_header", str)
 RBAC_TRUSTED_PROXY_IPS_KEY = web.AppKey("rbac_trusted_proxy_ips", set[str])
+RBAC_PROXY_SHARED_SECRET_KEY = web.AppKey("rbac_proxy_shared_secret", str)
 SESSION_FACTORY_KEY = web.AppKey("session_factory", object)
 CHART_MAX_LIMIT_KEY = web.AppKey("chart_max_limit", int)
 INDICATOR_HISTORY_MAX_LIMIT_KEY = web.AppKey("indicator_history_max_limit", int)
@@ -48,6 +50,7 @@ INDICATOR_HISTORY_DEFAULT_LIMIT = 100
 SLOW_REQUEST_THRESHOLD_MS = 2_000
 CORRELATION_ID_HEADER = "X-Correlation-ID"
 CORRELATION_ID_REQUEST_KEY = "correlation_id"
+RBAC_PROXY_TOKEN_HEADER = "X-RBAC-Proxy-Token"
 
 
 def _error_status(code: str) -> int:
@@ -98,6 +101,13 @@ def _user_from_request(request: web.Request) -> str:
         remote = (request.remote or "").strip()
         trusted_proxies = request.app[RBAC_TRUSTED_PROXY_IPS_KEY]
         if remote and remote not in trusted_proxies:
+            return "unknown"
+
+        shared_secret = request.app[RBAC_PROXY_SHARED_SECRET_KEY]
+        if not shared_secret:
+            return "unknown"
+        token = request.headers.get(RBAC_PROXY_TOKEN_HEADER, "").strip()
+        if not token or not compare_digest(token, shared_secret):
             return "unknown"
     header = request.app[RBAC_USER_HEADER_KEY]
     return request.headers.get(header, "").strip() or "unknown"
@@ -210,13 +220,8 @@ def _log_chart_latency(
 
 
 def _request_logger(request: web.Request) -> structlog.BoundLogger:
-    correlation_id = request.get(CORRELATION_ID_REQUEST_KEY)
-    if not correlation_id:
-        incoming = request.headers.get(CORRELATION_ID_HEADER, "").strip()
-        correlation_id = incoming or uuid4().hex
-        request[CORRELATION_ID_REQUEST_KEY] = correlation_id
     return request.app[LOGGER_KEY].bind(
-        correlation_id=correlation_id,
+        correlation_id=request[CORRELATION_ID_REQUEST_KEY],
         endpoint=request.path,
         method=request.method,
     )
@@ -274,6 +279,7 @@ def create_app(settings: Settings) -> web.Application:
     app[RBAC_STATUS_ROLES_KEY] = _csv_set(settings.rbac_status_roles)
     app[RBAC_USER_HEADER_KEY] = settings.rbac_user_header
     app[RBAC_TRUSTED_PROXY_IPS_KEY] = _csv_set(settings.rbac_trusted_proxy_ips)
+    app[RBAC_PROXY_SHARED_SECRET_KEY] = settings.rbac_proxy_shared_secret
 
     async def status_handler(request: web.Request) -> web.Response:
         ctrl: DaemonController = request.app[CONTROLLER_KEY]

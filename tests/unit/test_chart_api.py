@@ -122,6 +122,7 @@ def _init_db(db_url: str) -> None:
 
 async def _call(app, method: str, path: str):
     req = make_mocked_request(method, path, app=app)
+    req["correlation_id"] = "test-correlation-id"
     resp = await app._handle(req)
     payload = json.loads(resp.body.decode("utf-8")) if resp.body else None
     return resp.status, payload

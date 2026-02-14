@@ -89,20 +89,18 @@ def _adx(
             )
         )
 
-    smooth_tr = sum(tr_values[:period])
-    smooth_plus_dm = sum(plus_dm[:period])
-    smooth_minus_dm = sum(minus_dm[:period])
+    smooth_tr = sum(tr_values[:period]) / period
+    smooth_plus_dm = sum(plus_dm[:period]) / period
+    smooth_minus_dm = sum(minus_dm[:period]) / period
 
     dx_values: list[float] = []
     for index in range(period - 1, len(tr_values)):
         if index > period - 1:
-            # Wilder smoothing on running sums (not averages):
-            # S_t = S_{t-1} - (S_{t-1} / period) + x_t
-            smooth_tr = smooth_tr - (smooth_tr / period) + tr_values[index]
-            smooth_plus_dm = smooth_plus_dm - (smooth_plus_dm / period) + plus_dm[index]
+            smooth_tr = ((smooth_tr * (period - 1)) + tr_values[index]) / period
+            smooth_plus_dm = ((smooth_plus_dm * (period - 1)) + plus_dm[index]) / period
             smooth_minus_dm = (
-                smooth_minus_dm - (smooth_minus_dm / period) + minus_dm[index]
-            )
+                (smooth_minus_dm * (period - 1)) + minus_dm[index]
+            ) / period
 
         plus_di = (100.0 * smooth_plus_dm / smooth_tr) if smooth_tr else 0.0
         minus_di = (100.0 * smooth_minus_dm / smooth_tr) if smooth_tr else 0.0

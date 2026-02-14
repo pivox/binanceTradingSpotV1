@@ -57,6 +57,7 @@ async def _call(
     headers: dict[str, str] | None = None,
 ):
     req = make_mocked_request(method, path, app=app, headers=headers)
+    req["correlation_id"] = "test-correlation-id"
     resp = await app._handle(req)
     content_type = resp.headers.get("Content-Type", "")
     payload = None
@@ -231,6 +232,7 @@ def test_indicators_and_metrics_are_rbac_protected(tmp_path):
         rbac_status_roles="admin",
         rbac_user_header="X-User",
         rbac_trusted_proxy_ips="127.0.0.1",
+        rbac_proxy_shared_secret="test-secret",
     )
 
     async def _case(app):
@@ -244,13 +246,16 @@ def test_indicators_and_metrics_are_rbac_protected(tmp_path):
             app,
             "GET",
             "/indicators/latest?symbol=BTCUSDC&timeframe=1m",
-            headers={"X-User": "alice"},
+            headers={"X-User": "alice", "X-RBAC-Proxy-Token": "test-secret"},
         )
         assert status == 200
         assert payload["ok"] is True
 
         status, payload, _ = await _call(
-            app, "GET", "/metrics", headers={"X-User": "alice"}
+            app,
+            "GET",
+            "/metrics",
+            headers={"X-User": "alice", "X-RBAC-Proxy-Token": "test-secret"},
         )
         assert status == 200
         assert payload is None

@@ -11,6 +11,7 @@ from tradebot.config.settings import Settings
 
 async def _call(app, method: str, path: str, headers: dict | None = None):
     req = make_mocked_request(method, path, app=app, headers=headers)
+    req["correlation_id"] = "test-correlation-id"
     resp = await app._handle(req)
     payload = json.loads(resp.body.decode("utf-8")) if resp.body else None
     return resp.status, payload
@@ -111,17 +112,24 @@ def test_rbac_denies_without_role(tmp_path):
         rbac_operator_users="bob",
         rbac_status_roles="admin,operator",
         rbac_user_header="X-User",
+        rbac_proxy_shared_secret="test-secret",
     )
 
     async def _case(app):
         status, payload = await _call(
-            app, "POST", "/daemon/start", headers={"X-User": "mallory"}
+            app,
+            "POST",
+            "/daemon/start",
+            headers={"X-User": "mallory", "X-RBAC-Proxy-Token": "test-secret"},
         )
         assert status == 403
         assert payload["error"]["code"] == "permission_denied"
 
         status, payload = await _call(
-            app, "GET", "/daemon/status", headers={"X-User": "mallory"}
+            app,
+            "GET",
+            "/daemon/status",
+            headers={"X-User": "mallory", "X-RBAC-Proxy-Token": "test-secret"},
         )
         assert status == 403
         assert payload["error"]["code"] == "permission_denied"
@@ -142,23 +150,33 @@ def test_rbac_allows_admin(tmp_path):
         rbac_operator_users="",
         rbac_status_roles="admin",
         rbac_user_header="X-User",
+        rbac_proxy_shared_secret="test-secret",
     )
 
     async def _case(app):
         status, payload = await _call(
-            app, "POST", "/daemon/start", headers={"X-User": "alice"}
+            app,
+            "POST",
+            "/daemon/start",
+            headers={"X-User": "alice", "X-RBAC-Proxy-Token": "test-secret"},
         )
         assert status == 200
         assert payload["ok"] is True
 
         status, payload = await _call(
-            app, "POST", "/daemon/stop", headers={"X-User": "alice"}
+            app,
+            "POST",
+            "/daemon/stop",
+            headers={"X-User": "alice", "X-RBAC-Proxy-Token": "test-secret"},
         )
         assert status == 200
         assert payload["ok"] is True
 
         status, payload = await _call(
-            app, "GET", "/daemon/status", headers={"X-User": "alice"}
+            app,
+            "GET",
+            "/daemon/status",
+            headers={"X-User": "alice", "X-RBAC-Proxy-Token": "test-secret"},
         )
         assert status == 200
         assert payload["ok"] is True

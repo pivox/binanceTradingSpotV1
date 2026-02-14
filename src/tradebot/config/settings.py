@@ -38,3 +38,4 @@ class Settings(BaseSettings):
     rbac_status_roles: str = "admin,operator"
     rbac_user_header: str = "X-User"
     rbac_trusted_proxy_ips: str = "127.0.0.1,::1"
+    rbac_proxy_shared_secret: str = ""

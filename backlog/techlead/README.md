@@ -15,3 +15,11 @@
 - TL-13 CD - Deploiement controle vers staging puis production — `TL-13_cd_deploiement_staging_production.md`
 - TL-14 Execution trading en mode securise — `TL-14_execution_trading_mode_securise.md`
 - TL-15 Alertes en cas d'echec workflow — `TL-15_alerting_echec_workflow.md`
+- T-0021 Architecture - Blueprint indicateurs live + backfill + API + UI — `T-0021_architecture_indicateurs_live_backfill_api_ui.md`
+- T-0022 Backend - Moteur indicateurs normatif et etat incremental — `T-0022_moteur_indicateurs_normatif_etat_incremental.md`
+- T-0023 Backend - Backfill des trous avec priorisation et gestion rate-limit Binance — `T-0023_backfill_gaps_priorisation_et_rate_limit_binance.md`
+- T-0024 API - Catalogue indicateurs versionne, historique curseur et cache ETag — `T-0024_api_catalogue_indicateurs_versionne_et_cache_etag.md`
+- T-0025 Ops - Observabilite, SLO et alerting du pipeline indicateurs — `T-0025_observabilite_slo_alerting_pipeline_indicateurs.md`
+- T-0026 UI - Screener indicateurs avec table virtualisee — `T-0026_ui_screener_indicateurs_table_virtualisee.md`
+- T-0027 UI - Filtres/tris debounce et presets rechargeables — `T-0027_ui_filtres_tris_debounce_et_presets.md`
+- T-0028 QA - Non-regression indicateurs, backfill et contrat API — `T-0028_qa_non_regression_indicateurs_et_contrat_api.md`

@@ -35,6 +35,7 @@ RBAC_ADMIN_USERS_KEY = web.AppKey("rbac_admin_users", set[str])
 RBAC_OPERATOR_USERS_KEY = web.AppKey("rbac_operator_users", set[str])
 RBAC_STATUS_ROLES_KEY = web.AppKey("rbac_status_roles", set[str])
 RBAC_USER_HEADER_KEY = web.AppKey("rbac_user_header", str)
+RBAC_TRUSTED_PROXY_IPS_KEY = web.AppKey("rbac_trusted_proxy_ips", set[str])
 SESSION_FACTORY_KEY = web.AppKey("session_factory", object)
 CHART_MAX_LIMIT_KEY = web.AppKey("chart_max_limit", int)
 INDICATOR_HISTORY_MAX_LIMIT_KEY = web.AppKey("indicator_history_max_limit", int)
@@ -93,6 +94,11 @@ def _json_indicator_err(
 
 
 def _user_from_request(request: web.Request) -> str:
+    if request.app[RBAC_ENABLED_KEY]:
+        remote = (request.remote or "").strip()
+        trusted_proxies = request.app[RBAC_TRUSTED_PROXY_IPS_KEY]
+        if remote and remote not in trusted_proxies:
+            return "unknown"
     header = request.app[RBAC_USER_HEADER_KEY]
     return request.headers.get(header, "").strip() or "unknown"
 
@@ -117,7 +123,7 @@ def _is_allowed(action: str, roles: set[str], request: web.Request) -> bool:
         return True
     if action in {"start", "stop"}:
         return bool(roles & {"admin", "operator"})
-    if action == "status":
+    if action in {"status", "read"}:
         return bool(roles & request.app[RBAC_STATUS_ROLES_KEY])
     return False
 
@@ -267,6 +273,7 @@ def create_app(settings: Settings) -> web.Application:
     app[RBAC_OPERATOR_USERS_KEY] = _csv_set(settings.rbac_operator_users)
     app[RBAC_STATUS_ROLES_KEY] = _csv_set(settings.rbac_status_roles)
     app[RBAC_USER_HEADER_KEY] = settings.rbac_user_header
+    app[RBAC_TRUSTED_PROXY_IPS_KEY] = _csv_set(settings.rbac_trusted_proxy_ips)
 
     async def status_handler(request: web.Request) -> web.Response:
         ctrl: DaemonController = request.app[CONTROLLER_KEY]
@@ -528,6 +535,13 @@ def create_app(settings: Settings) -> web.Application:
         log = _request_logger(request)
         started_at = perf_counter()
         result = "success"
+        user = _user_from_request(request)
+        roles = _roles_for_user(user, request)
+
+        if not _is_allowed("read", roles, request):
+            result = "denied"
+            _log_chart_latency(log, "/indicators/latest", started_at, result=result)
+            return _json_err("permission_denied", "user not authorized", status=403)
 
         symbol = (request.query.get("symbol") or "").strip().upper()
         if not symbol or not _is_valid_symbol(symbol):
@@ -611,6 +625,13 @@ def create_app(settings: Settings) -> web.Application:
         log = _request_logger(request)
         started_at = perf_counter()
         result = "success"
+        user = _user_from_request(request)
+        roles = _roles_for_user(user, request)
+
+        if not _is_allowed("read", roles, request):
+            result = "denied"
+            _log_chart_latency(log, "/indicators/history", started_at, result=result)
+            return _json_err("permission_denied", "user not authorized", status=403)
 
         symbol = (request.query.get("symbol") or "").strip().upper()
         if not symbol or not _is_valid_symbol(symbol):
@@ -702,7 +723,13 @@ def create_app(settings: Settings) -> web.Application:
             }
         )
 
-    async def metrics_handler(_request: web.Request) -> web.Response:
+    async def metrics_handler(request: web.Request) -> web.Response:
+        log = _request_logger(request)
+        user = _user_from_request(request)
+        roles = _roles_for_user(user, request)
+        if not _is_allowed("read", roles, request):
+            log.info("metrics_access_denied", user=user, remote=request.remote)
+            return _json_err("permission_denied", "user not authorized", status=403)
         return web.Response(
             body=generate_latest(),
             headers={"Content-Type": CONTENT_TYPE_LATEST},

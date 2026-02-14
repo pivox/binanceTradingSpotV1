@@ -50,7 +50,12 @@ def _seed_snapshots(db_url: str, *, count: int = 3) -> None:
     engine.dispose()
 
 
-async def _call(app, method: str, path: str, headers: dict[str, str] | None = None):
+async def _call(
+    app,
+    method: str,
+    path: str,
+    headers: dict[str, str] | None = None,
+):
     req = make_mocked_request(method, path, app=app, headers=headers)
     resp = await app._handle(req)
     content_type = resp.headers.get("Content-Type", "")
@@ -206,3 +211,48 @@ def test_upsert_snapshot_recomputes_etag_when_payload_changes(tmp_path):
         assert first.etag != second.etag
     finally:
         engine.dispose()
+
+
+def test_indicators_and_metrics_are_rbac_protected(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'indicator_api.db'}"
+    _seed_snapshots(db_url)
+    settings = Settings(
+        api_host="127.0.0.1",
+        api_port=0,
+        database_url=db_url,
+        daemon_pid_file=str(tmp_path / "ws_candle_daemon.pid"),
+        daemon_command=f'{sys.executable} -c "import time; time.sleep(60)"',
+        daemon_stop_timeout_s=0.2,
+        indicator_history_max_limit=5,
+        indicator_default_schema_version="1.0.0",
+        rbac_enabled=True,
+        rbac_admin_users="alice",
+        rbac_operator_users="",
+        rbac_status_roles="admin",
+        rbac_user_header="X-User",
+        rbac_trusted_proxy_ips="127.0.0.1",
+    )
+
+    async def _case(app):
+        status, payload, _ = await _call(
+            app, "GET", "/indicators/latest?symbol=BTCUSDC&timeframe=1m"
+        )
+        assert status == 403
+        assert payload["error"]["code"] == "permission_denied"
+
+        status, payload, _ = await _call(
+            app,
+            "GET",
+            "/indicators/latest?symbol=BTCUSDC&timeframe=1m",
+            headers={"X-User": "alice"},
+        )
+        assert status == 200
+        assert payload["ok"] is True
+
+        status, payload, _ = await _call(
+            app, "GET", "/metrics", headers={"X-User": "alice"}
+        )
+        assert status == 200
+        assert payload is None
+
+    asyncio.run(_with_app(settings, _case))

@@ -122,11 +122,7 @@ def _init_db(db_url: str) -> None:
 
 async def _call(app, method: str, path: str):
     req = make_mocked_request(method, path, app=app)
-    match = await app.router.resolve(req)
-    if hasattr(match, "add_app"):
-        match.add_app(app)
-    req._match_info = match
-    resp = await match.handler(req)
+    resp = await app._handle(req)
     payload = json.loads(resp.body.decode("utf-8")) if resp.body else None
     return resp.status, payload
 

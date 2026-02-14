@@ -67,3 +67,15 @@ US-0007 impose un contrat API stable/versionne avec representation explicite des
 ### Validation
 - Ajout test non-regression `test_upsert_snapshot_recomputes_etag_when_payload_changes`.
 - Ajout test non-regression `test_indicators_history_default_limit_is_clamped_by_configured_max`.
+
+## Journal Dev (2026-02-14) - Retours MR supplementaires
+### Corrige
+- Protection RBAC ajoutee sur:
+  - `GET /indicators/latest`
+  - `GET /indicators/history`
+  - `GET /metrics`
+- Hardening RBAC: le header utilisateur n'est pris en compte que si `request.remote` appartient a la allowlist `rbac_trusted_proxy_ips`.
+- `updated_at` des modeles DB critiques passe en auto-update (`onupdate=func.now()`).
+
+### Validation
+- Ajout test `test_indicators_and_metrics_are_rbac_protected` (controle acces + proxy non fiable refuse).

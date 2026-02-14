@@ -11,11 +11,7 @@ from tradebot.config.settings import Settings
 
 async def _call(app, method: str, path: str, headers: dict | None = None):
     req = make_mocked_request(method, path, app=app, headers=headers)
-    match = await app.router.resolve(req)
-    if hasattr(match, "add_app"):
-        match.add_app(app)
-    req._match_info = match
-    resp = await match.handler(req)
+    resp = await app._handle(req)
     payload = json.loads(resp.body.decode("utf-8")) if resp.body else None
     return resp.status, payload
 

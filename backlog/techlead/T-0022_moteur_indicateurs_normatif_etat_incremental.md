@@ -59,3 +59,7 @@ US-0005 impose des formules normatives et un comportement strict sur bougies clo
 - Ajout tests non-regression dans `tests/unit/test_indicators.py`:
   - warmup RSI off-by-one,
   - snapshot RSI warmup a 14 candles.
+
+## Journal Dev (2026-02-14) - Clarification MR
+### Corrige
+- Clarification explicite dans le code ADX: lissage Wilder applique sur des sommes lissees (pas sur des moyennes), pour eviter une mauvaise interpretation de la formule.

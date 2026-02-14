@@ -96,6 +96,8 @@ def _adx(
     dx_values: list[float] = []
     for index in range(period - 1, len(tr_values)):
         if index > period - 1:
+            # Wilder smoothing on running sums (not averages):
+            # S_t = S_{t-1} - (S_{t-1} / period) + x_t
             smooth_tr = smooth_tr - (smooth_tr / period) + tr_values[index]
             smooth_plus_dm = smooth_plus_dm - (smooth_plus_dm / period) + plus_dm[index]
             smooth_minus_dm = (

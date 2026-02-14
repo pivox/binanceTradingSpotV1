@@ -2,10 +2,12 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    JSON,
     Integer,
     Numeric,
     String,
     TIMESTAMP,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -61,5 +63,66 @@ class CandleGapRequest(Base):
     from_open_time_ms = Column(BigInteger, nullable=False)
     to_open_time_ms = Column(BigInteger, nullable=False)
     detected_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IndicatorSnapshot(Base):
+    __tablename__ = "indicator_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "timeframe",
+            "close_time_ms",
+            name="uq_indicator_snapshots_symbol_tf_close_time",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String, nullable=False)
+    timeframe = Column(String, nullable=False)
+    close_time_ms = Column(BigInteger, nullable=False)
+    computed_at_ms = Column(BigInteger, nullable=False)
+    schema_version = Column(String, nullable=False, default="1.0.0")
+    payload_json = Column(JSON, nullable=False)
+    etag = Column(String, nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class BackfillJob(Base):
+    __tablename__ = "backfill_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "timeframe",
+            "from_open_time_ms",
+            "to_open_time_ms",
+            name="uq_backfill_job_target_window",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String, nullable=False)
+    timeframe = Column(String, nullable=False)
+    from_open_time_ms = Column(BigInteger, nullable=False)
+    to_open_time_ms = Column(BigInteger, nullable=False)
+    priority = Column(Integer, nullable=False, default=0)
+    status = Column(String, nullable=False, default="PENDING")
+    attempts = Column(Integer, nullable=False, default=0)
+    next_retry_at_ms = Column(BigInteger, nullable=False, default=0)
+    cooldown_until_ms = Column(BigInteger, nullable=False, default=0)
+    last_http_status = Column(Integer, nullable=True)
+    last_error = Column(Text, nullable=True)
+    last_weight_used = Column(Integer, nullable=True)
+    rate_mode = Column(String, nullable=False, default="normal")
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )

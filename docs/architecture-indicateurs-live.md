@@ -66,7 +66,7 @@ Concevoir une architecture coherente pour realiser US-0005 a US-0008 sans diverg
 
 ### Tables
 - `candles(symbol, timeframe, open_time, close_time, open, high, low, close, volume, is_final, source, updated_at)`
-- `indicator_snapshots(symbol, timeframe, close_time, computed_at, schema_version, payload_json, etag)`
+- `indicator_snapshots(symbol, timeframe, close_time, computed_at, schema_version, payload_json, etag, rsi, macd_hist, atr, adx, stoch_rsi_k, stoch_rsi_d, vwap, bb_upper, bb_middle, bb_lower, ... indicateurs filtrables/triables)`
 - `indicator_state(symbol, timeframe, state_json, last_close_time, updated_at)` (etat incremental/warmup)
 - `backfill_jobs(id, symbol, timeframe, range_start, range_end, priority, status, attempts, next_retry_at, last_error, created_at, updated_at)`
 - `api_rate_budget(scope, used_weight, window, observed_at)`
@@ -74,6 +74,8 @@ Concevoir une architecture coherente pour realiser US-0005 a US-0008 sans diverg
 ### Contrat payload (US-0007)
 - Respect strict des namespaces: `macd`, `bollinger`, `stoch_rsi`, `pivots`.
 - Valeur indisponible en `{status:"unavailable",reason:"warmup|missing_history|not_supported"}`.
+- `payload_json` reste la source canonique flexible; les colonnes numeriques denormalisees sont maintenues pour les filtres/tris performants US-0008.
+- Index recommandes: `(timeframe, close_time desc)`, `(timeframe, rsi)`, `(timeframe, macd_hist)`, et autres indexes btree sur metriques exposees au tri/filtre.
 
 ## Strategies techniques clefs
 
@@ -96,7 +98,8 @@ Concevoir une architecture coherente pour realiser US-0005 a US-0008 sans diverg
 ### API/Cache
 - ETag derive de `(symbol,timeframe,close_time,computed_at,schema_version)`.
 - Reponse 304 si `If-None-Match` egal.
-- Historique par curseur opaque encode (`close_time`,`symbol`,`timeframe`).
+- Historique par curseur opaque dependant du tri demande, encode `(sort_value, close_time, symbol, timeframe)`.
+- Le serveur impose toujours un tie-break stable (`close_time`,`symbol`,`timeframe`) pour garantir une pagination deterministe, meme avec tri sur indicateur (`rsi`, `macd_hist`, etc.).
 
 ### Performance UI
 - Virtualisation pour listes volumineuses.

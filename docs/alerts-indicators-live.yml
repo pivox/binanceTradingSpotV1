@@ -1,0 +1,35 @@
+groups:
+  - name: tradebot-indicators-live
+    rules:
+      - alert: IndicatorsLatestHighLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(tradebot_indicator_api_latency_ms_bucket{endpoint="/indicators/latest"}[5m])) by (le)) > 300
+        for: 10m
+        labels:
+          severity: warning
+          team: tradebot
+        annotations:
+          summary: "p95 /indicators/latest > 300ms"
+          description: "La latence p95 depasse le SLO sur 10 minutes."
+          runbook: "docs/runbook-indicators-live.md#latence-api-elevee"
+
+      - alert: IndicatorsBackfillCooldownSpike
+        expr: increase(tradebot_backfill_events_total{event="backfill_cooldown"}[10m]) > 3
+        for: 5m
+        labels:
+          severity: critical
+          team: tradebot
+        annotations:
+          summary: "Multiples cooldown backfill (418)"
+          description: "Des bans temporaires Binance sont detectes."
+          runbook: "docs/runbook-indicators-live.md#cooldown-backfill-418"
+
+      - alert: IndicatorsSnapshotStale
+        expr: max(tradebot_indicator_snapshot_freshness_ms) > 120000
+        for: 15m
+        labels:
+          severity: warning
+          team: tradebot
+        annotations:
+          summary: "Snapshots stale > 120s"
+          description: "La fraicheur des indicateurs depasse le seuil attendu."
+          runbook: "docs/runbook-indicators-live.md#snapshots-stale"

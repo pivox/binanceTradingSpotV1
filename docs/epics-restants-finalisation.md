@@ -1,14 +1,16 @@
 # Epics restants pour finaliser le projet
 
-## Methodologie de lecture
+## Méthodologie de lecture
 - Source prioritaire: statuts backlog PO/TechLead/Bugs.
 - Verification de coherence avec le code et la documentation operationnelle existante (API/UI/CI deja presentes).
 - Ce document ne change pas le scope produit: il consolide uniquement ce qu'il reste a terminer.
+- Demande complementaire prise en compte: inclure explicitement le **moteur de validation de signaux** (regles MTF) dans les epics de finalisation.
 
 ## Constat rapide
-- Les US PO `US-0001` à `US-0008` sont encore marquées `TODO` côté backlog, même si une partie importante du socle API/UI existe déjà.
-- Côté TechLead, l'axe CI/CD historique (TL-09 à TL-15) est largement clôturé (`DONE`/`VALIDATED`).
-- Le chantier encore actif est surtout le bloc **indicateurs live** (moteur + backfill + contrat API + UI screener + QA de non-régression).
+- Les US PO `US-0001` a `US-0008` sont encore marquees `TODO` cote backlog, meme si une partie importante du socle API/UI existe deja.
+- Cote TechLead, l'axe CI/CD historique (TL-09 a TL-15) est largement cloture (`DONE`/`VALIDATED`).
+- Le chantier encore actif est surtout le bloc **indicateurs live** (moteur + backfill + contrat API + UI screener + QA de non-regression).
+- Un second chantier structurant reste a finaliser: **moteur de validation de signaux** configurable par regles (logique MTF/cascade, gouvernance des validations, traçabilite des decisions).
 
 ## Epic 1 - Fiabilisation du pipeline indicateurs live (priorite P0)
 
@@ -76,7 +78,29 @@
 - PO: `US-0008`
 - Tech: `T-0026`, `T-0027`
 
-## Epic 5 - QA transverse et readiness release finale (priorite P0)
+## Epic 5 - Moteur de validation de signaux MTF configurable (priorite P0)
+
+### Pourquoi cet epic est restant
+- Le besoin existe fonctionnellement (validation de signaux avant execution), mais n'apparait pas encore comme epic PO explicite dans les US.
+- Le code contient deja des briques (`signal_engine`, `exit_engine`, `services/mtf/cascade`) sans specification produit unifiee de type "catalogue de regles".
+- Demande complementaire exprimee: converger vers un moteur de validation declaratif (inspire d'une approche `validations.regular.yaml`) pour uniformiser les checks.
+
+### Resultat attendu pour fermer l'epic
+- Contrat declaratif de regles de validation (format YAML/JSON versionne) couvrant les controles principaux:
+  - confirmations multi-timeframes,
+  - seuils indicateurs,
+  - exclusions marche (volatilite/liquidite),
+  - regles de conflit/precedence.
+- Moteur d'evaluation deterministe (ordre de regles stable, resultat reproductible).
+- Explicabilite: pour chaque signal, journal de decision (`passed/failed`, regle, valeur observee, seuil).
+- Tests de non-regression sur scenarios de validation (golden files + cas limites).
+
+### Tickets inclus (a creer/aligner)
+- PO: nouvelle US "Validation des signaux par regles configurables".
+- Tech: nouveau ticket TechLead "Moteur de validation declaratif + registry de regles".
+- QA: plan de tests contractuels sur jeu de configurations (regular/aggressive/conservative).
+
+## Epic 6 - QA transverse et readiness release finale (priorite P0)
 
 ### Pourquoi cet epic est restant
 - `T-0028` (non-regression indicateurs/backfill/API/UI) est `TODO`.
@@ -93,36 +117,86 @@
 - Bugs: `B-0008`
 
 
-## Epic 6 - Backtesting transverse sur l'ensemble des US de trading (priorite P0)
+## Epic 7 - Backtesting transverse sur l'ensemble des US de trading (priorite P0)
 
-### Pourquoi cet epic est restant
-- Le backlog actuel couvre ingestion, indicateurs, API et UI, mais ne formalise pas encore un epic backtesting end-to-end avec jalons clairs de validation.
-- Sans backtesting industrialise, il est difficile de qualifier objectivement la pertinence des strategies, d'arbitrer entre variantes et de securiser les mises en production.
-- La demande explicite est d'avoir une "epic backtesting" transverse qui structure les decisions produit/trading sur des resultats mesurables.
+### Vision PO
+Fournir une capacite de backtesting fiable, lisible et decisionnelle pour valider les strategies avant mise en production.
+L'epic doit permettre au PO, au TechLead et a la QA de répondre à une question simple : **"est-ce que cette version améliore réellement le couple performance/risque ?"**
 
-### Resultat attendu pour fermer l'epic
-- Cadre de backtest reproductible (dataset fige, fenetres temporelles, frais/slippage explicites, seed stable).
-- Rejeu complet de la chaine: candles -> indicateurs -> decisions/positions -> metriques.
-- Sorties standardisees: PnL, drawdown, hit ratio, expectancy, exposure, turnover, couts.
-- Comparateur de strategies (baseline vs candidate) avec rapport diff interpretable pour le PO et le TechLead.
-- Garde-fous QA: seuils minimaux de qualite pour eviter une regression silencieuse avant release.
-- Industrialisation CI: execution backtest nocturne + gate optionnel pre-release avec archivage des rapports.
+### Probleme produit a resoudre
+- Les US actuelles couvrent bien la collecte, le calcul d'indicateurs, l'API et l'UI, mais pas encore la boucle d'evaluation historique complete.
+- Sans backtesting cadre, les decisions d'evolution des regles de signaux restent peu objectivables.
+- Les regressions de qualite peuvent passer en production faute de seuils quantitatifs explicites.
+
+### Scope fonctionnel (MVP puis extension)
+#### MVP (obligatoire)
+- Lancer un backtest reproductible sur une periode, un univers de paires et un profil de regles donne.
+- Rejouer de bout en bout: `candles -> indicateurs -> validations MTF -> signaux -> execution simulee -> KPIs`.
+- Produire un rapport standard machine + humain (JSON + Markdown) exploitable en revue de release.
+
+#### Extension (phase 2)
+- Comparaison automatique baseline vs candidate.
+- Multi-profils (regular/aggressive/conservative) et classement automatique.
+- Scenarios de stress (forte volatilite, regime de range, regime de tendance).
+
+### User Stories cibles de l'epic
+1. En tant que **PO**, je veux comparer objectivement deux versions de strategie afin de decider un go/no-go release.
+2. En tant que **TechLead**, je veux un runner deterministe pour reproduire les resultats localement et en CI.
+3. En tant que **QA**, je veux des seuils de non-regression pour bloquer une release qui degrade les metriques critiques.
+4. En tant qu'**Ops**, je veux des rapports historises pour comprendre l'impact d'un changement de regles.
+
+### Criteres d'acceptation (Definition of Done)
+1. Un meme jeu d'entrees (dataset + config + seed) produit exactement les memes sorties de backtest.
+2. Le moteur couvre au minimum les US `US-0005`, `US-0006`, `US-0007` et la logique de validation de signaux (Epic 5).
+3. Le rapport de sortie contient au minimum les métriques suivantes :
+  - `PnL`
+  - `max_drawdown`
+  - `hit_ratio`
+  - `expectancy`
+  - `exposure`
+  - `turnover`
+  - `fees`
+  - `slippage`
+4. Un mode "compare" fournit un diff baseline/candidate avec verdict explicite (`improved`, `neutral`, `degraded`).
+5. Les seuils de qualite definis par PO/TechLead sont executables en CI et bloquent en cas de regression.
+6. Chaque run est tracable (horodatage, version code, version regles, hash dataset, parametres).
+
+### NFR
+- Reproductibilite: 100% deterministe a inputs identiques.
+- Performance: execution d'un run standard (univers cible PO) en temps acceptable pour usage CI.
+- Auditabilite: chaque decision de trade simule est explicable via les regles appliquees.
+- Maintainabilite: ajout d'un nouveau profil/regle sans recoder le moteur.
+
+### Hors scope (pour eviter la derive)
+- Optimisation automatique de parametres type "auto-ML" en phase initiale.
+- Trading live reel depuis le moteur de backtest.
+- Visualisations avancees interactives (dashboard complet) avant validation du socle.
+
+### Decoupage propose en sous-lots
+- **Lot BT-1**: contrat d'entree/sortie + runner deterministe + rapport minimal.
+- **Lot BT-2**: simulation execution (fees/slippage) + metriques standardisees.
+- **Lot BT-3**: mode comparaison baseline/candidate + verdict.
+- **Lot BT-4**: gates CI de non-regression + publication des artefacts.
+- **Lot BT-5**: scenarios de stress et couverture QA etendue.
 
 ### Tickets inclus (a creer/aligner)
-- PO: nouvelle US "Backtesting des strategies".
-- Tech: ticket TechLead "Backtest runner + catalogues de scenarios + reporting".
+- PO: nouvelle US "Backtesting des strategies et des regles de validation".
+- Tech: ticket TechLead "Moteur/backtest runner + catalogues de scenarios + reporting".
 - QA: campagne de non-regression backtest integree a `T-0028`.
-- Liens fonctionnels: `US-0005`, `US-0006`, `US-0007`, `US-0008`.
+- Liens fonctionnels: `US-0005`, `US-0006`, `US-0007`, `US-0008` + Epic 5 (validation de signaux).
 
 ## Proposition d'ordre d'execution
 1. **Epic 1 + Epic 2 + Epic 3** en flux coordonne (coeur data + contrat API).
-2. **Epic 5** en continu pendant l'implementation (QA continue, pas en fin de projet uniquement).
-3. **Epic 4** ensuite pour finaliser la valeur trader cote interface de screening.
-4. **Epic 6** en continu dès les epics 1-5 pour valider quantitativement les choix (et en gate pre-release).
+2. **Epic 5** en parallele: cadrer tot le moteur de validation de signaux pour eviter un recablage tardif de l'execution.
+3. **Epic 6** en continu pendant l'implementation (QA continue, pas en fin de projet uniquement).
+4. **Epic 4** ensuite pour finaliser la valeur trader cote interface de screening.
+5. **Epic 7** en continu des epics 1-5 pour valider quantitativement les choix (et en gate pre-release).
 
-## Questions ouvertes (à trancher PO/TechLead)
-- Quel niveau de tolérance est accepté pour l'écart numérique des indicateurs (epsilon par indicateur) ?
-- Quelle politique de versionning API appliquer en cas de changement de formule/métadonnée ?
-- Quelle volumétrie cible officielle du screener (200, 500, 1000 paires) pour verrouiller les NFR front ?
-- Quels jeux de données historiques de référence sont retenus pour les campagnes de backtesting (période, paires, granularités) ?
-- Quels seuils minimaux de performance/risque définissent un "go" release (ex: max drawdown, Sharpe, taux de trades invalides) ?
+## Questions ouvertes (a trancher PO/TechLead)
+- Quel niveau de tolerance est accepte pour l'ecart numerique des indicateurs (epsilon par indicateur) ?
+- Quelle politique de versionning API appliquer en cas de changement de formule/metadonnee ?
+- Quelle volumetrie cible officielle du screener (200, 500, 1000 paires) pour verrouiller les NFR front ?
+- Quel format cible pour les regles de validation de signaux (YAML versionne, schema JSON, ou mix) ?
+- Souhaite-t-on plusieurs profils de validation (regular/aggressive/conservative) selectionnables au runtime ?
+- Quels jeux de donnees historiques de reference sont retenus pour les campagnes de backtesting (periode, paires, granularites) ?
+- Quels seuils minimaux de performance/risque definissent un "go" release (ex: max drawdown, Sharpe, taux de trades invalides) ?

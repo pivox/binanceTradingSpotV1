@@ -260,6 +260,7 @@ def _build_and_store_latest_snapshot_from_candles(
     timeframe: str,
     schema_version: str,
 ) -> tuple[dict[str, Any] | None, str | None]:
+    bootstrap_logger = structlog.get_logger().bind(symbol=symbol, timeframe=timeframe)
     candles = ChartRepository(session).fetch_candles(
         symbol=symbol,
         timeframe=timeframe,
@@ -282,7 +283,12 @@ def _build_and_store_latest_snapshot_from_candles(
                     volume=float(candle["volume"]),
                 )
             )
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError) as exc:
+            bootstrap_logger.warning(
+                "snapshot_bootstrap_skip_invalid_candle",
+                open_time_ms=candle.get("open_time_ms"),
+                error=str(exc),
+            )
             continue
 
     if not samples:

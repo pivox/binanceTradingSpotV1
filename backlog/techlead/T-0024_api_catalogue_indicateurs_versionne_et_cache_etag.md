@@ -91,3 +91,8 @@ US-0007 impose un contrat API stable/versionne avec representation explicite des
 ### Validation
 - `tests/unit/test_indicator_api.py`
   - Ajout test non-regression `test_indicators_latest_handles_concurrent_bootstrap_conflict`.
+
+## Journal Dev (2026-02-15) - Retours PR #17
+### Corrige
+- `src/tradebot/api/app.py`
+  - Journalisation explicite des bougies invalides ignorees pendant le bootstrap snapshot (`snapshot_bootstrap_skip_invalid_candle`) avec contexte `symbol/timeframe/open_time_ms`.

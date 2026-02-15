@@ -1,7 +1,7 @@
 ---
 id: T-0041
 title: "Logging multi-level configurable (global + API + daemon)"
-status: NEEDS_QA
+status: VALIDATED
 owner: dev
 links: ["T-0025", "T-0035"]
 ---

@@ -19,7 +19,9 @@ def _get_execution_mode() -> tuple[str, bool]:
     settings = Settings()
     mode = settings.execution_mode.strip().lower()
     approved = bool(settings.live_trading_approved)
-    if mode not in {"dry_run", "live"}:
+    if mode == "dry_run":
+        mode = "backtesting"
+    if mode not in {"backtesting", "live"}:
         raise RuntimeError(f"Invalid execution_mode={settings.execution_mode}")
     if mode == "live" and not approved:
         raise RuntimeError("live trading requires LIVE_TRADING_APPROVED=true")

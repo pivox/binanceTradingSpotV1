@@ -113,6 +113,18 @@
         flex-wrap: wrap;
       }
 
+      .mode {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .mode-buttons {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
       button {
         border: 0;
         padding: 12px 18px;
@@ -133,6 +145,18 @@
         background: linear-gradient(130deg, #fef3, var(--accent-2));
         color: #0c1a2a;
         box-shadow: 0 10px 20px rgba(61, 214, 255, 0.25);
+      }
+
+      button.ghost {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--text);
+        border: 1px solid var(--card-border);
+        box-shadow: none;
+      }
+
+      button.ghost.active {
+        border-color: var(--accent-2);
+        box-shadow: 0 0 0 1px var(--accent-2) inset;
       }
 
       button:disabled {
@@ -252,6 +276,17 @@
           <label for="userInput">Utilisateur</label>
           <input id="userInput" placeholder="ex: alice" />
         </div>
+
+        <div class="mode">
+          <div class="field">
+            <label>Mode execution</label>
+          </div>
+          <div class="mode-buttons">
+            <button class="ghost" id="modeBacktestingBtn" type="button">Backtesting</button>
+            <button class="ghost" id="modeLiveBtn" type="button">Live</button>
+          </div>
+          <div class="pid" id="modeLabel">Mode: -</div>
+        </div>
       </div>
 
       <div class="card">
@@ -273,6 +308,9 @@
       const userInput = document.getElementById("userInput");
       const lastUpdate = document.getElementById("lastUpdate");
       const refreshBadge = document.getElementById("refreshBadge");
+      const modeBacktestingBtn = document.getElementById("modeBacktestingBtn");
+      const modeLiveBtn = document.getElementById("modeLiveBtn");
+      const modeLabel = document.getElementById("modeLabel");
 
       const REFRESH_MS = 1000;
       refreshBadge.textContent = (REFRESH_MS / 1000).toFixed(1) + "s";
@@ -289,6 +327,13 @@
           h["X-User"] = user;
         }
         return h;
+      }
+
+      function applyMode(mode) {
+        const normalizedMode = String(mode || "").toLowerCase();
+        modeLabel.textContent = "Mode: " + (normalizedMode || "-");
+        modeBacktestingBtn.classList.toggle("active", normalizedMode === "backtesting");
+        modeLiveBtn.classList.toggle("active", normalizedMode === "live");
       }
 
       function applyStatus(status, pid) {
@@ -311,14 +356,57 @@
         pidLabel.textContent = "PID: " + (pid ?? "-");
       }
 
-      async function fetchStatus(silent) {
+      async function fetchMode() {
+        const res = await fetch("/daemon/mode", { headers: headers() });
+        const payload = await res.json();
+        if (!payload.ok) {
+          throw new Error(payload.error?.message || "Erreur mode");
+        }
+        applyMode(payload.data.mode);
+      }
+
+      async function switchMode(mode) {
+        setFeedback("Changement de mode...", "");
         try {
-          const res = await fetch("/daemon/status", { headers: headers() });
+          const res = await fetch("/daemon/mode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...headers() },
+            body: JSON.stringify({ mode }),
+          });
           const payload = await res.json();
           if (!payload.ok) {
-            throw new Error(payload.error?.message || "Erreur status");
+            throw new Error(payload.error?.message || "Erreur mode");
           }
-          applyStatus(payload.data.status, payload.data.pid);
+          applyMode(payload.data.mode);
+          if (payload.data.applies_on_next_start) {
+            setFeedback("Mode mis a jour (applique au prochain demarrage du daemon)", "ok");
+          } else {
+            setFeedback("Mode mis a jour", "ok");
+          }
+          lastUpdate.textContent = new Date().toLocaleTimeString();
+        } catch (err) {
+          setFeedback(err.message, "err");
+        }
+      }
+
+      async function fetchStatus(silent) {
+        try {
+          const [statusRes, modeRes] = await Promise.all([
+            fetch("/daemon/status", { headers: headers() }),
+            fetch("/daemon/mode", { headers: headers() }),
+          ]);
+          const statusPayload = await statusRes.json();
+          const modePayload = await modeRes.json();
+
+          if (!statusPayload.ok) {
+            throw new Error(statusPayload.error?.message || "Erreur status");
+          }
+          if (!modePayload.ok) {
+            throw new Error(modePayload.error?.message || "Erreur mode");
+          }
+
+          applyStatus(statusPayload.data.status, statusPayload.data.pid);
+          applyMode(modePayload.data.mode);
           lastUpdate.textContent = new Date().toLocaleTimeString();
           if (!silent) {
             setFeedback("Etat mis a jour", "ok");
@@ -337,6 +425,7 @@
             throw new Error(payload.error?.message || "Erreur action");
           }
           applyStatus(payload.data.status, payload.data.pid);
+          await fetchMode();
           setFeedback(successMessage, "ok");
           lastUpdate.textContent = new Date().toLocaleTimeString();
         } catch (err) {
@@ -346,6 +435,8 @@
 
       startBtn.addEventListener("click", () => action("/daemon/start", "Daemon demarre"));
       stopBtn.addEventListener("click", () => action("/daemon/stop", "Daemon stoppe"));
+      modeBacktestingBtn.addEventListener("click", () => switchMode("backtesting"));
+      modeLiveBtn.addEventListener("click", () => switchMode("live"));
 
       fetchStatus(true);
       setInterval(() => fetchStatus(true), REFRESH_MS);

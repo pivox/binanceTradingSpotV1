@@ -56,3 +56,7 @@ Le daemon alimente en continu la table `candles`. L'UI doit se mettre à jour en
     - ajout d'un garde `indicatorRequestInFlight`,
     - les retries bootstrap n'annulent plus la requete active.
   - Correction du fallback de selection initiale: un `pair` fourni par query string n'est retenu que si des bougies existent, sinon fallback sur le flux de decouverte.
+
+## Journal Dev (2026-02-15) - Retours PR #17
+- `src/tradebot/api/static/chart.js`
+  - Remplacement des valeurs temporelles "magiques" de l'axe (`6h`, `3j`) par des constantes nommees (`SIX_HOURS_MS`, `THREE_DAYS_MS`) pour clarifier la logique de formatage.

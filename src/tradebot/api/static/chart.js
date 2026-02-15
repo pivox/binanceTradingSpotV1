@@ -5,6 +5,8 @@ const MAX_RENDER_CANDLES = 500;
 const FALLBACK_TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h"];
 const TIMEFRAME_RE = /^[1-9][0-9]*[mhdwM]$/;
 const SYMBOL_RE = /^[A-Z0-9]{2,20}$/;
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 const chartStateEl = document.getElementById("chartState");
 const chartHostEl = document.getElementById("chartHost");
@@ -1180,10 +1182,10 @@ class CandleCanvasChart {
       return "-";
     }
     const value = new Date(ms);
-    if (rangeMs <= 6 * 60 * 60 * 1000) {
+    if (rangeMs <= SIX_HOURS_MS) {
       return value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
-    if (rangeMs <= 3 * 24 * 60 * 60 * 1000) {
+    if (rangeMs <= THREE_DAYS_MS) {
       return value.toLocaleString([], {
         day: "2-digit",
         month: "2-digit",

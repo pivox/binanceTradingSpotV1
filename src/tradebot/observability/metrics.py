@@ -27,3 +27,15 @@ INDICATOR_SNAPSHOT_FRESHNESS_MS = Gauge(
     "Freshness of latest indicator snapshots in milliseconds",
     ("symbol", "timeframe"),
 )
+WS_RECONNECT_TOTAL = Counter(
+    "tradebot_ws_reconnect_total",
+    "Websocket reconnect attempts for the candle daemon",
+)
+WS_BOOT_SLOW_TOTAL = Counter(
+    "tradebot_ws_boot_slow_total",
+    "Websocket boot cycles that exceeded the configured threshold",
+)
+WS_STREAMS_SELECTED = Gauge(
+    "tradebot_ws_streams_selected",
+    "Number of selected websocket streams at daemon boot",
+)

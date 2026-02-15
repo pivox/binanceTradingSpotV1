@@ -1,5 +1,8 @@
 # US - Interface UI de controle du daemon
 
+## Decomposition en User Stories
+- US-0022 UI - Controler le daemon (etat, demarrer, stopper) avec feedback (`US-0022-ui-controle-daemon-demarrer-stopper.md`)
+
 ## User Story
 **En tant que** utilisateur de l'application  
 **Je souhaite** avoir une interface UI pour demarrer et stopper le daemon  

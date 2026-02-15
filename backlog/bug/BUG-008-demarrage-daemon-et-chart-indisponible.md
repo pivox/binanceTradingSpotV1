@@ -1,7 +1,7 @@
 ---
 id: B-0008
 title: "Demarrage daemon depuis UI: crash au bootstrap DB et etat trompeur, chart indisponible"
-status: TODO
+status: VALIDATED
 owner: qa
 links: ["B-0008", "TL-01", "T-0016", "T-0017", "T-0020"]
 ---

@@ -1,7 +1,7 @@
 ---
 id: B-0010
 title: "ETag `/indicators/latest` inchange quand le payload change"
-status: TODO
+status: VALIDATED
 owner: qa
 links: ["B-0010", "T-0024", "US-0007"]
 ---

@@ -239,6 +239,19 @@ def _request_logger(request: web.Request) -> structlog.BoundLogger:
     )
 
 
+def _daemon_permissions_payload(
+    user: str, roles: set[str], request: web.Request
+) -> dict:
+    return {
+        "user": user,
+        "roles": sorted(roles),
+        "can_read_status": _is_allowed("status", roles, request),
+        "can_start": _is_allowed("start", roles, request),
+        "can_stop": _is_allowed("stop", roles, request),
+        "can_switch_mode": (not request.app[RBAC_ENABLED_KEY]) or ("admin" in roles),
+    }
+
+
 def create_app(settings: Settings) -> web.Application:
     configure_logging()
     logger = structlog.get_logger()
@@ -331,6 +344,23 @@ def create_app(settings: Settings) -> web.Application:
             pid=st.pid,
         )
         return _json_ok({"status": st.status, "pid": st.pid})
+
+    async def permissions_handler(request: web.Request) -> web.Response:
+        log = _request_logger(request)
+        user = _user_from_request(request)
+        roles = _roles_for_user(user, request)
+        payload = _daemon_permissions_payload(user, roles, request)
+        log.info(
+            "daemon_permissions",
+            user=user,
+            remote=request.remote,
+            roles=payload["roles"],
+            can_read_status=payload["can_read_status"],
+            can_start=payload["can_start"],
+            can_stop=payload["can_stop"],
+            can_switch_mode=payload["can_switch_mode"],
+        )
+        return _json_ok(payload)
 
     async def start_handler(request: web.Request) -> web.Response:
         ctrl: DaemonController = request.app[CONTROLLER_KEY]
@@ -429,11 +459,19 @@ def create_app(settings: Settings) -> web.Application:
         user = _user_from_request(request)
         roles = _roles_for_user(user, request)
 
-        if not (request.app[RBAC_ENABLED_KEY] and roles.intersection(request.app[RBAC_ADMIN_USERS_KEY])):
+        if request.app[RBAC_ENABLED_KEY] and "admin" not in roles:
+            log.info(
+                "daemon_mode_switch",
+                user=user,
+                remote=request.remote,
+                result="denied",
+                endpoint="/daemon/mode",
+            )
+            return _json_err("permission_denied", "user not authorized")
 
         try:
             payload = await request.json()
-        except json.JSONDecodeError:
+        except (JSONDecodeError, ValueError):
             return _json_err("invalid_request", "invalid JSON payload", status=400)
 
         if not isinstance(payload, Mapping):
@@ -847,6 +885,7 @@ def create_app(settings: Settings) -> web.Application:
         )
 
     app.router.add_get("/daemon/status", status_handler)
+    app.router.add_get("/daemon/permissions", permissions_handler)
     app.router.add_post("/daemon/start", start_handler)
     app.router.add_post("/daemon/stop", stop_handler)
     app.router.add_get("/daemon/mode", mode_status_handler)

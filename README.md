@@ -31,6 +31,7 @@ poetry run python -m tradebot.apps.daemon_api_main
 Endpoints:
 
 - `GET /daemon/status`
+- `GET /daemon/permissions`
 - `POST /daemon/start`
 - `POST /daemon/stop`
 - `GET /daemon/mode`
@@ -58,6 +59,11 @@ USDC collection:
 
 - Uses Binance 24h ticker field `quoteVolume` to sort pairs
 - Limit with `USDC_PAIRS_LIMIT`
+- Hard cap guard with `USDC_STREAMS_HARD_CAP` (fail-fast at boot if exceeded)
+- Reconnect observability metrics:
+  - `tradebot_ws_reconnect_total`
+  - `tradebot_ws_boot_slow_total`
+  - `tradebot_ws_streams_selected`
 
 Documents a voir:
 

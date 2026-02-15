@@ -15,14 +15,22 @@ from .types import (
 from tradebot.config.settings import Settings
 
 
+def normalize_execution_mode(raw_mode: str) -> str:
+    mode = raw_mode.strip().lower()
+    if mode == "dry_run":
+        return "backtesting"
+    if mode in {"backtesting", "live"}:
+        return mode
+    raise ValueError("execution mode must be one of: backtesting, live")
+
+
 def _get_execution_mode() -> tuple[str, bool]:
     settings = Settings()
-    mode = settings.execution_mode.strip().lower()
     approved = bool(settings.live_trading_approved)
     try:
         mode = normalize_execution_mode(settings.execution_mode)
-    except ValueError as e:
-        raise RuntimeError(f"Invalid execution_mode={settings.execution_mode}: {e}")
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid execution_mode={settings.execution_mode}: {exc}")
     if mode == "live" and not approved:
         raise RuntimeError("live trading requires LIVE_TRADING_APPROVED=true")
     return mode, approved

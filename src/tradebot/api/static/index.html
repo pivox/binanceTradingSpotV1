@@ -269,12 +269,13 @@
 
         <div class="controls">
           <button class="primary" id="startBtn">Demarrer</button>
-          <button class="secondary" id="stopBtn">Stopper</button>
+          <button class="secondary" id="stopBtn">Arreter</button>
         </div>
 
         <div class="field">
           <label for="userInput">Utilisateur</label>
           <input id="userInput" placeholder="ex: alice" />
+          <div class="pid" id="permissionLabel">Permissions: chargement...</div>
         </div>
 
         <div class="mode">
@@ -306,11 +307,22 @@
       const stopBtn = document.getElementById("stopBtn");
       const feedback = document.getElementById("feedback");
       const userInput = document.getElementById("userInput");
+      const permissionLabel = document.getElementById("permissionLabel");
       const lastUpdate = document.getElementById("lastUpdate");
       const refreshBadge = document.getElementById("refreshBadge");
       const modeBacktestingBtn = document.getElementById("modeBacktestingBtn");
       const modeLiveBtn = document.getElementById("modeLiveBtn");
       const modeLabel = document.getElementById("modeLabel");
+
+      let daemonStatus = "unknown";
+      let daemonPermissions = {
+        user: "unknown",
+        roles: [],
+        can_read_status: true,
+        can_start: true,
+        can_stop: true,
+        can_switch_mode: true,
+      };
 
       const REFRESH_MS = 1000;
       refreshBadge.textContent = (REFRESH_MS / 1000).toFixed(1) + "s";
@@ -329,6 +341,39 @@
         return h;
       }
 
+      function refreshControlsState() {
+        if (daemonStatus === "running") {
+          startBtn.disabled = true;
+          stopBtn.disabled = !daemonPermissions.can_stop;
+        } else if (daemonStatus === "stopped") {
+          startBtn.disabled = !daemonPermissions.can_start;
+          stopBtn.disabled = true;
+        } else {
+          startBtn.disabled = !daemonPermissions.can_start;
+          stopBtn.disabled = !daemonPermissions.can_stop;
+        }
+        const modeSwitchDisabled = !daemonPermissions.can_switch_mode;
+        modeBacktestingBtn.disabled = modeSwitchDisabled;
+        modeLiveBtn.disabled = modeSwitchDisabled;
+      }
+
+      function applyPermissions(payload) {
+        daemonPermissions = { ...daemonPermissions, ...(payload || {}) };
+        const roles = Array.isArray(daemonPermissions.roles) ? daemonPermissions.roles.join(",") : "";
+        permissionLabel.textContent =
+          "Permissions: " +
+          (daemonPermissions.user || "unknown") +
+          " roles=[" +
+          roles +
+          "] start=" +
+          String(Boolean(daemonPermissions.can_start)) +
+          " stop=" +
+          String(Boolean(daemonPermissions.can_stop)) +
+          " mode=" +
+          String(Boolean(daemonPermissions.can_switch_mode));
+        refreshControlsState();
+      }
+
       function applyMode(mode) {
         const normalizedMode = String(mode || "").toLowerCase();
         modeLabel.textContent = "Mode: " + (normalizedMode || "-");
@@ -337,35 +382,35 @@
       }
 
       function applyStatus(status, pid) {
+        daemonStatus = status || "unknown";
         statusBox.classList.remove("running", "stopped");
-        if (status === "running") {
+        if (daemonStatus === "running") {
           statusBox.classList.add("running");
           statusLabel.textContent = "Running";
-          startBtn.disabled = true;
-          stopBtn.disabled = false;
-        } else if (status === "stopped") {
+        } else if (daemonStatus === "stopped") {
           statusBox.classList.add("stopped");
           statusLabel.textContent = "Stopped";
-          startBtn.disabled = false;
-          stopBtn.disabled = true;
         } else {
-          statusLabel.textContent = status || "Unknown";
-          startBtn.disabled = false;
-          stopBtn.disabled = false;
+          statusLabel.textContent = daemonStatus || "Unknown";
         }
         pidLabel.textContent = "PID: " + (pid ?? "-");
+        refreshControlsState();
       }
 
-      async function fetchMode() {
-        const res = await fetch("/daemon/mode", { headers: headers() });
+      async function fetchPermissions() {
+        const res = await fetch("/daemon/permissions", { headers: headers() });
         const payload = await res.json();
         if (!payload.ok) {
-          throw new Error(payload.error?.message || "Erreur mode");
+          throw new Error(payload.error?.message || "Erreur permissions");
         }
-        applyMode(payload.data.mode);
+        applyPermissions(payload.data);
       }
 
       async function switchMode(mode) {
+        if (!daemonPermissions.can_switch_mode) {
+          setFeedback("Action mode non autorisee", "err");
+          return;
+        }
         setFeedback("Changement de mode...", "");
         try {
           const res = await fetch("/daemon/mode", {
@@ -385,11 +430,19 @@
           }
           lastUpdate.textContent = new Date().toLocaleTimeString();
         } catch (err) {
-          setFeedback(err.message, "err");
+          setFeedback(err.message || "Erreur mode", "err");
         }
       }
 
       async function fetchStatus(silent) {
+        if (!daemonPermissions.can_read_status) {
+          applyStatus("unknown", null);
+          applyMode("-");
+          if (!silent) {
+            setFeedback("Lecture statut non autorisee", "err");
+          }
+          return;
+        }
         try {
           const [statusRes, modeRes] = await Promise.all([
             fetch("/daemon/status", { headers: headers() }),
@@ -397,14 +450,12 @@
           ]);
           const statusPayload = await statusRes.json();
           const modePayload = await modeRes.json();
-
           if (!statusPayload.ok) {
             throw new Error(statusPayload.error?.message || "Erreur status");
           }
           if (!modePayload.ok) {
             throw new Error(modePayload.error?.message || "Erreur mode");
           }
-
           applyStatus(statusPayload.data.status, statusPayload.data.pid);
           applyMode(modePayload.data.mode);
           lastUpdate.textContent = new Date().toLocaleTimeString();
@@ -412,11 +463,19 @@
             setFeedback("Etat mis a jour", "ok");
           }
         } catch (err) {
-          setFeedback(err.message, "err");
+          setFeedback(err.message || "Erreur status", "err");
         }
       }
 
       async function action(endpoint, successMessage) {
+        if (endpoint === "/daemon/start" && !daemonPermissions.can_start) {
+          setFeedback("Action start non autorisee", "err");
+          return;
+        }
+        if (endpoint === "/daemon/stop" && !daemonPermissions.can_stop) {
+          setFeedback("Action arret non autorisee", "err");
+          return;
+        }
         setFeedback("En cours...", "");
         try {
           const res = await fetch(endpoint, { method: "POST", headers: headers() });
@@ -425,23 +484,46 @@
             throw new Error(payload.error?.message || "Erreur action");
           }
           applyStatus(payload.data.status, payload.data.pid);
-            throw new Error(payload.error?.message || "Erreur action");
-          }
-          applyStatus(payload.data.status, payload.data.pid);
           setFeedback(successMessage, "ok");
           lastUpdate.textContent = new Date().toLocaleTimeString();
         } catch (err) {
-          setFeedback(err.message, "err");
+          setFeedback(err.message || "Erreur action", "err");
         }
       }
 
       startBtn.addEventListener("click", () => action("/daemon/start", "Daemon demarre"));
-      stopBtn.addEventListener("click", () => action("/daemon/stop", "Daemon stoppe"));
+      stopBtn.addEventListener("click", () => action("/daemon/stop", "Daemon arrete"));
       modeBacktestingBtn.addEventListener("click", () => switchMode("backtesting"));
       modeLiveBtn.addEventListener("click", () => switchMode("live"));
 
-      fetchStatus(true);
-      setInterval(() => fetchStatus(true), REFRESH_MS);
+      userInput.addEventListener("change", async () => {
+        try {
+          await fetchPermissions();
+          await fetchStatus(true);
+        } catch (err) {
+          setFeedback(err.message || "Erreur chargement", "err");
+        }
+      });
+
+      (async () => {
+        try {
+          await fetchPermissions();
+          await fetchStatus(true);
+        } catch (err) {
+          setFeedback(err.message || "Erreur chargement", "err");
+        }
+      })();
+
+      const refreshLoop = async () => {
+        try {
+          await fetchStatus(true);
+        } catch (err) {
+          setFeedback(err.message || "Erreur chargement", "err");
+        } finally {
+          setTimeout(refreshLoop, REFRESH_MS);
+        }
+      };
+      refreshLoop();
     </script>
   </body>
 </html>

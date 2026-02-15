@@ -15,7 +15,12 @@ Pour bloquer le merge en cas d'echec CI, activer une regle de protection de bran
 - Le gate `mypy` est deferre en attendant la resolution de `BUG-004`.
 - Les secrets requis pour le job `secrets_check` sont `BINANCE_API_KEY` et `BINANCE_API_SECRET` (secrets GitHub). La verification ne s'execute que sur `push` vers `main`.
 - Les artefacts publies incluent `dist/` (build) et `artifacts/` (logs/tests) avec une retention de 7 jours.
+- Une synthese de run est publiee dans l'artefact `ci-summary` (`artifacts/ci-summary.txt`) avec:
+  - `ci_duration_sec`
+  - `overall_status`
+  - `lint_outcome`, `tests_outcome`, `build_outcome`
 - Alerting: configurer le secret `SLACK_WEBHOOK_URL` pour recevoir une notification en cas d'echec du workflow CI.
+- Le format des alertes CI est standardise en `field=value`.
 
 ## Configuration des secrets
 Le workflow CI utilise des secrets de **repository** (le job ne reference pas d'environnement GitHub).

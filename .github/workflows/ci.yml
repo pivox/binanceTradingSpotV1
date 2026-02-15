@@ -43,11 +43,12 @@ jobs:
             error_summary="Secret check failed"
           fi
           MSG=$(cat <<EOF
-CI failed.
+event=workflow_failed
 workflow=${{ github.workflow }}
 run_id=${{ github.run_id }}
 job=${{ github.job }}
 ref=${{ github.ref }}
+failed_step=secrets_check
 error_summary=${error_summary}
 url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 EOF
@@ -64,6 +65,9 @@ PY
   test:
     runs-on: ubuntu-latest
     steps:
+      - name: Start CI timer
+        run: echo "CI_START_TS=$(date +%s)" >> "${GITHUB_ENV}"
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -112,6 +116,39 @@ PY
             artifacts/
           retention-days: 7
 
+      - name: Write CI summary
+        if: always()
+        env:
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          mkdir -p artifacts
+          end_ts=$(date +%s)
+          start_ts="${CI_START_TS:-$end_ts}"
+          ci_duration_sec=$((end_ts - start_ts))
+          overall_status="success"
+          if [ "${LINT_OUTCOME}" != "success" ] || [ "${TESTS_OUTCOME}" != "success" ] || [ "${BUILD_OUTCOME}" != "success" ]; then
+            overall_status="failure"
+          fi
+          cat > artifacts/ci-summary.txt <<EOF
+ci_duration_sec=${ci_duration_sec}
+overall_status=${overall_status}
+lint_outcome=${LINT_OUTCOME}
+tests_outcome=${TESTS_OUTCOME}
+build_outcome=${BUILD_OUTCOME}
+run_id=${{ github.run_id }}
+ref=${{ github.ref }}
+EOF
+
+      - name: Upload CI summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-summary
+          path: artifacts/ci-summary.txt
+          retention-days: 7
+
       - name: Notify Slack on failure
         if: failure()
         env:
@@ -142,7 +179,7 @@ PY
           fi
 
           MSG=$(cat <<EOF
-CI failed.
+event=workflow_failed
 workflow=${{ github.workflow }}
 run_id=${{ github.run_id }}
 job=${{ github.job }}

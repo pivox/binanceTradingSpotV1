@@ -23,3 +23,13 @@
 - T-0026 UI - Screener indicateurs avec table virtualisee — `T-0026_ui_screener_indicateurs_table_virtualisee.md`
 - T-0027 UI - Filtres/tris debounce et presets rechargeables — `T-0027_ui_filtres_tris_debounce_et_presets.md`
 - T-0028 QA - Non-regression indicateurs, backfill et contrat API — `T-0028_qa_non_regression_indicateurs_et_contrat_api.md`
+- T-0029 Solution - Lot 2 pour US non implementees (US-0005, US-0006, US-0008) — `T-0029_solution_lot2_us_non_implementees.md`
+- T-0030 Backend - Pipeline indicateurs live avec etat incremental et replay — `T-0030_pipeline_indicateurs_live_etat_incremental_replay.md`
+- T-0031 Backend - Orchestrateur backfill runtime avec priorisation et rate-limit — `T-0031_orchestrateur_backfill_runtime_rate_limit.md`
+- T-0032 API - Endpoint screener indicateurs multi-paires avec filtres et tris — `T-0032_api_screener_indicateurs_multi_pairs.md`
+- T-0033 UI - Screener virtualise avec filtres, tris debounce et presets — `T-0033_ui_screener_virtualise_filtres_tris_presets.md`
+- T-0034 Solution - Lot 3 pour US non versionnees (collecte USDC, UI daemon, CI/CD) — `T-0034_solution_lot3_us_non_versionnees.md`
+- T-0035 Collecte USDC - Hardening streams, reconnexion et observabilite — `T-0035_collecte_usdc_hardening_streams_et_reconnexion.md`
+- T-0036 UI Daemon - Aligner UX avec RBAC et permissions explicites — `T-0036_ui_daemon_rbac_permissions_explicites.md`
+- T-0037 CI/CD - Finalisation operationnelle (SLO, rollback, checks deploy) — `T-0037_ci_cd_finalisation_operationnelle.md`
+- T-0038 Traitement - Tickets non versionnes (normalisation et triage dev) — `T-0038_traitement_tickets_non_versionnes.md`

@@ -1,5 +1,13 @@
 # Epic: Collecte dynamique des klines Spot USDC
 
+## Decomposition en User Stories
+- US-0009 Collecte USDC - Recuperer dynamiquement les paires Spot USDC (`US-0009-collecte-usdc-recuperer-paires-dynamiquement.md`)
+- US-0010 Collecte USDC - Trier les paires par volume de trade 24h (`US-0010-collecte-usdc-tri-par-volume-24h.md`)
+- US-0011 Collecte USDC - Limiter le nombre de paires ecoutees via une variable d'environnement (`US-0011-collecte-usdc-limite-via-variable-env.md`)
+- US-0012 Collecte USDC - S'abonner en websocket sur la liste dynamique retenue (`US-0012-collecte-usdc-abonnement-websocket-liste-dynamique.md`)
+- US-0013 Collecte USDC - Forcer une liste statique de symboles via SYMBOLS (override) (`US-0013-collecte-usdc-override-manuel-symbols.md`)
+- US-0014 Collecte USDC - NFR observabilite, performance et respect des limites Binance (`US-0014-collecte-usdc-nfr-observabilite-performance-limites.md`)
+
 ## US-01 - Recuperation dynamique des paires USDC
 **En tant que** systeme de collecte market data  
 **Je veux** recuperer automatiquement la liste des paires Spot se terminant par `USDC` depuis Binance  

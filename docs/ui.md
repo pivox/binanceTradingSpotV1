@@ -4,6 +4,9 @@
 
 - Route: `/`
 - Purpose: daemon start/stop/status control
+- Permissions endpoint used by UI: `GET /daemon/permissions`
+- In RBAC mode, buttons are disabled according to `can_start` / `can_stop`
+- UI handles denied actions with explicit feedback messages (including 403 cases)
 
 ## Chart page
 

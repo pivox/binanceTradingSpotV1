@@ -1,5 +1,14 @@
 # Epic: Workflows CI/CD et execution trading securisee
 
+## Decomposition en User Stories
+- US-0015 CI - Declencher automatiquement la CI sur push et pull_request (`US-0015-ci-declenchement-automatique.md`)
+- US-0016 CI - Rendre obligatoires le lint et les tests unitaires (`US-0016-ci-lint-tests-obligatoires.md`)
+- US-0017 CI - Gerer les secrets Binance de maniere securisee (`US-0017-ci-secrets-securises.md`)
+- US-0018 CI - Publier des artefacts (build + logs) a chaque run reussi (`US-0018-ci-publication-artefacts.md`)
+- US-0019 CD - Deployer manuellement vers staging puis production avec validations (`US-0019-cd-deploiement-staging-production.md`)
+- US-0020 Execution trading - Mode securise avec simulation par defaut (`US-0020-execution-trading-mode-securise.md`)
+- US-0021 Alerting - Notifier rapidement en cas d'echec workflow ou job critique (`US-0021-alerting-echec-workflow.md`)
+
 ## US-01 - Declenchement CI automatique
 **En tant que** developpeur  
 **Je veux** que la CI se lance sur `push` et `pull_request` sur `main`  

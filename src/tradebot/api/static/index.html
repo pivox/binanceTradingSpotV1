@@ -425,7 +425,9 @@
             throw new Error(payload.error?.message || "Erreur action");
           }
           applyStatus(payload.data.status, payload.data.pid);
-          await fetchMode();
+            throw new Error(payload.error?.message || "Erreur action");
+          }
+          applyStatus(payload.data.status, payload.data.pid);
           setFeedback(successMessage, "ok");
           lastUpdate.textContent = new Date().toLocaleTimeString();
         } catch (err) {

@@ -441,7 +441,7 @@ def create_app(settings: Settings) -> web.Application:
 
         try:
             payload = await request.json()
-        except JSONDecodeError:
+        except json.JSONDecodeError:
             return _json_err("invalid_request", "invalid JSON payload", status=400)
 
         if not isinstance(payload, Mapping):

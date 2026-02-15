@@ -36,6 +36,19 @@ def _get_execution_mode() -> tuple[str, bool]:
     return mode, approved
 
 
+def _activity_log(level: str, event: str, **fields: Any) -> None:
+    logger = activity.logger
+    log_method = getattr(logger, level.lower(), logger.info)
+    if not fields:
+        log_method(event)
+        return
+    try:
+        log_method(event, **fields)
+    except TypeError:
+        details = " ".join(f"{key}={value!r}" for key, value in sorted(fields.items()))
+        log_method("%s %s", event, details)
+
+
 # =========================
 # Helpers (placeholders)
 # =========================
@@ -62,7 +75,13 @@ async def fetch_candle_close_events(
     Recommended: watermark cursor + ORDER BY open_time_ms / id.
     """
     # TODO: SELECT ... WHERE shard_id=? AND id > cursor LIMIT ?
-    activity.logger.info("fetch_candle_close_events shard=%s limit=%s", shard_id, limit)
+    _activity_log(
+        "info",
+        "fetch_candle_close_events",
+        shard_id=shard_id,
+        shard_count=shard_count,
+        limit=limit,
+    )
     return []
 
 
@@ -70,7 +89,7 @@ async def fetch_candle_close_events(
 async def mark_candle_close_events_processed(events: list[CandleCloseEvent]) -> None:
     """Mark consumed events (idempotent)."""
     # TODO: DELETE FROM candle_close_event WHERE (symbol,tf,open_time) IN (...)
-    activity.logger.info("mark events processed count=%s", len(events))
+    _activity_log("info", "mark_events_processed", count=len(events))
 
 
 # =========================
@@ -122,7 +141,7 @@ async def load_mtf_state(symbol: str) -> MtfState:
 @activity.defn(name="save_mtf_state")
 async def save_mtf_state(state: MtfState) -> None:
     # TODO: UPSERT mtf_state
-    activity.logger.info("save_mtf_state symbol=%s", state.symbol)
+    _activity_log("info", "save_mtf_state", symbol=state.symbol)
 
 
 # =========================
@@ -155,7 +174,8 @@ async def create_buy_intent(symbol: str, open_time_ms: int) -> OrderIntent:
     intent_key = f"buy:{symbol}:{open_time_ms}"
     payload = {"order_type": "LIMIT", "quote_budget": 100.0}
     # TODO: UPSERT order_intent(intent_key UNIQUE)
-    activity.logger.info(
+    _activity_log(
+        "info",
         "signal_intent_created",
         intent_key=intent_key,
         side="BUY",
@@ -179,7 +199,8 @@ async def create_sell_intent(
     intent_key = f"sell:{position_id}:{lot_id}"
     payload = {"order_type": "LIMIT", "qty_pct": qty_pct, "lot_id": lot_id}
     # TODO: UPSERT order_intent
-    activity.logger.info(
+    _activity_log(
+        "info",
         "signal_intent_created",
         intent_key=intent_key,
         side="SELL",
@@ -208,7 +229,8 @@ async def place_order(intent: OrderIntent) -> dict[str, Any]:
     """
     mode, approved = _get_execution_mode()
     # TODO: call Binance REST, apply quantization, handle rate limits/retries.
-    activity.logger.info(
+    _activity_log(
+        "info",
         "place_order",
         side=intent.side,
         symbol=intent.symbol,
@@ -228,7 +250,8 @@ async def place_order(intent: OrderIntent) -> dict[str, Any]:
 async def cancel_order(symbol: str, order_id: str) -> dict[str, Any]:
     mode, approved = _get_execution_mode()
     # TODO: Binance cancel
-    activity.logger.info(
+    _activity_log(
+        "info",
         "cancel_order",
         symbol=symbol,
         order_id=order_id,
@@ -268,7 +291,7 @@ async def update_position_after_actions(
     position_id: str, patch: dict[str, Any]
 ) -> None:
     # TODO: UPDATE position SET ...
-    activity.logger.info("update_position %s patch=%s", position_id, patch)
+    _activity_log("info", "update_position", position_id=position_id, patch=patch)
 
 
 # =========================

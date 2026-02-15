@@ -534,7 +534,12 @@ async def ws_loop() -> None:
 
 def main() -> None:
     load_dotenv()
-    configure_logging()
+    daemon_log_level = (
+        os.environ.get("DAEMON_LOG_LEVEL", "").strip()
+        or os.environ.get("LOG_LEVEL", "").strip()
+        or "INFO"
+    )
+    configure_logging(level=daemon_log_level)
     asyncio.run(ws_loop())
 
 

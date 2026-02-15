@@ -74,6 +74,17 @@
         <span id="ohlcClose">C: -</span>
       </section>
 
+      <section class="indicator-card" aria-label="Indicateurs techniques">
+        <header class="indicator-header">
+          <div>
+            <span class="indicator-title">Indicateurs</span>
+            <small id="indicatorMeta" class="indicator-meta">-</small>
+          </div>
+          <span id="indicatorStatus" class="indicator-status idle">Initialisation</span>
+        </header>
+        <div id="indicatorGrid" class="indicator-grid" aria-live="polite"></div>
+      </section>
+
       <section class="chart-card">
         <div class="state loading" id="chartState">Chargement des chandeliers...</div>
         <div class="chart-host" id="chartHost" aria-label="Graphique chandeliers"></div>

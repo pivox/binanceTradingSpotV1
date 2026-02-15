@@ -78,12 +78,12 @@
 - PO: `US-0008`
 - Tech: `T-0026`, `T-0027`
 
-## Epic 5 - Moteur de validations de signaux MTF configurable (priorite P0)
+## Epic 5 - Moteur de validation de signaux MTF configurable (priorité P0)
 
 ### Pourquoi cet epic est restant
 - Le besoin existe fonctionnellement (validation de signaux avant execution), mais n'apparait pas encore comme epic PO explicite dans les US.
 - Le code contient deja des briques (`signal_engine`, `exit_engine`, `services/mtf/cascade`) sans specification produit unifiee de type "catalogue de regles".
-- Demande complementaire exprimee: converger vers un moteur de validations declaratif (inspire d'une approche `validations.regular.yaml`) pour uniformiser les checks.
+- Demande complémentaire exprimée : converger vers un moteur de validation déclaratif (inspiré d'une approche `validations.regular.yaml`) pour uniformiser les contrôles.
 
 ### Resultat attendu pour fermer l'epic
 - Contrat declaratif de regles de validation (format YAML/JSON versionne) couvrant les controles principaux:
@@ -131,7 +131,7 @@ L'epic doit permettre au PO, au TechLead et à la QA de répondre à une questio
 ### Scope fonctionnel (MVP puis extension)
 #### MVP (obligatoire)
 - Lancer un backtest reproductible sur une periode, un univers de paires et un profil de regles donne.
-- Rejouer de bout en bout: `candles -> indicateurs -> validations MTF -> signaux -> execution simulee -> KPIs`.
+- Rejouer de bout en bout: `candles -> indicateurs -> validation MTF -> signaux -> execution simulee -> KPIs`.
 - Produire un rapport standard machine + humain (JSON + Markdown) exploitable en revue de release.
 
 #### Extension (phase 2)
@@ -147,7 +147,7 @@ L'epic doit permettre au PO, au TechLead et à la QA de répondre à une questio
 
 ### Criteres d'acceptation (Definition of Done)
 1. Un meme jeu d'entrees (dataset + config + seed) produit exactement les memes sorties de backtest.
-2. Le moteur couvre au minimum les US `US-0005`, `US-0006`, `US-0007` et la logique de validations signaux (Epic 5).
+2. Le moteur couvre au minimum les US `US-0005`, `US-0006`, `US-0007` et la logique de validation des signaux (Epic 5).
 3. Le rapport de sortie contient au minimum: `PnL`, `max_drawdown`, `hit_ratio`, `expectancy`, `exposure`, `turnover`, `fees`, `slippage`.
 4. Un mode "compare" fournit un diff baseline/candidate avec verdict explicite (`improved`, `neutral`, `degraded`).
 5. Les seuils de qualite definis par PO/TechLead sont executables en CI et bloquent en cas de regression.
@@ -189,6 +189,6 @@ L'epic doit permettre au PO, au TechLead et à la QA de répondre à une questio
 - Quelle politique de versionning API appliquer en cas de changement de formule/metadonnee ?
 - Quelle volumetrie cible officielle du screener (200, 500, 1000 paires) pour verrouiller les NFR front ?
 - Quel format cible pour les regles de validation des signaux (YAML versionne, schema JSON, ou mix) ?
-- Souhaite-t-on plusieurs profils de validation (regular/aggressive/conservative) selectionnables au runtime ?
+- Souhaite-t-on plusieurs profils de validation (regular/aggressive/conservative) sélectionnables au runtime ?
 - Quels jeux de donnees historiques de reference sont retenus pour les campagnes de backtesting (periode, paires, granularites) ?
 - Quels seuils minimaux de performance/risque definissent un "go" release (ex: max drawdown, Sharpe, taux de trades invalides) ?

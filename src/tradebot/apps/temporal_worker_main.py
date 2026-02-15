@@ -1,19 +1,17 @@
 import asyncio
 import logging
-import os
-from pathlib import Path
 
 from temporalio.client import Client
 from temporalio.worker import Worker
 
 from tradebot.config.loader import load_app_config
 from tradebot.config.settings import Settings
+from tradebot.config.utils import get_app_config_path
 from tradebot.infra.temporal.schedules import ScheduleBootstrap
 from tradebot.temporal_app import activities as act
 from tradebot.temporal_app import workflows as wf
 
 TASK_QUEUE = "tradebot"
-APP_CONFIG_PATH = "APP_CONFIG_PATH"
 
 
 def build_worker(client: Client) -> Worker:
@@ -57,7 +55,7 @@ def build_worker(client: Client) -> Worker:
 async def run_worker() -> None:
     settings = Settings()
     client = await Client.connect(settings.temporal_address)
-    app_config = load_app_config(Path(os.getenv(APP_CONFIG_PATH, "config/app.yaml")))
+    app_config = load_app_config(get_app_config_path())
     schedule_bootstrap = ScheduleBootstrap(client, task_queue=TASK_QUEUE)
     bootstrap_result = await schedule_bootstrap.bootstrap(app_config)
     worker = build_worker(client)

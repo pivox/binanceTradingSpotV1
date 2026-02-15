@@ -65,14 +65,12 @@ def test_build_schedule_definitions_uses_expected_intervals_and_cron():
         RECONCILE_ORDERS_SCHEDULE_ID,
         REFRESH_EXCHANGEINFO_SCHEDULE_ID,
     }
-    assert (
-        by_id[RECONCILE_KLINES_SCHEDULE_ID].schedule.spec.intervals[0].every
-        == timedelta(minutes=30)
-    )
-    assert (
-        by_id[RECONCILE_ORDERS_SCHEDULE_ID].schedule.spec.intervals[0].every
-        == timedelta(minutes=10)
-    )
+    assert by_id[RECONCILE_KLINES_SCHEDULE_ID].schedule.spec.intervals[
+        0
+    ].every == timedelta(minutes=30)
+    assert by_id[RECONCILE_ORDERS_SCHEDULE_ID].schedule.spec.intervals[
+        0
+    ].every == timedelta(minutes=10)
     assert by_id[REFRESH_EXCHANGEINFO_SCHEDULE_ID].schedule.spec.cron_expressions == [
         "10 3 * * *"
     ]
@@ -90,9 +88,7 @@ def test_build_schedule_definitions_rejects_invalid_daily_format():
 
 
 def test_schedule_bootstrap_is_idempotent_with_existing_schedules():
-    client = _FakeScheduleClient(
-        existing_schedule_ids={RECONCILE_ORDERS_SCHEDULE_ID}
-    )
+    client = _FakeScheduleClient(existing_schedule_ids={RECONCILE_ORDERS_SCHEDULE_ID})
 
     async def _case():
         bootstrap = ScheduleBootstrap(client, task_queue="tradebot")

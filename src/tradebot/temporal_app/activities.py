@@ -20,7 +20,12 @@ from .types import (
 )
 from tradebot.config.settings import Settings
 from tradebot.infra.db.engine import create_session_factory
-from tradebot.infra.db.models import BackfillJob, CandleGapRequest, ExchangeInfoCache
+from tradebot.infra.db.models import (
+    BackfillJob,
+    Candle,
+    CandleGapRequest,
+    ExchangeInfoCache,
+)
 from tradebot.infra.db.repositories.backfill_repo_sql import (
     BackfillRepoSql,
     BackfillRetryPolicy,
@@ -139,11 +144,18 @@ def _build_gaps_from_requests(
     return by_symbol_tf
 
 
-def _target_symbols_for_detection() -> set[str]:
+def _target_symbols_for_detection(session) -> set[str]:
     raw = os.environ.get("RECONCILE_SYMBOLS", "").strip()
     if raw:
         symbols = {item.strip().upper() for item in raw.split(",") if item.strip()}
         return {item for item in symbols if item}
+    symbols = {
+        str(value).upper()
+        for value in session.scalars(select(Candle.symbol).distinct())
+        if value is not None and str(value).strip()
+    }
+    if symbols:
+        return symbols
     return set(DEFAULT_RECONCILE_SYMBOLS)
 
 
@@ -393,7 +405,6 @@ async def _backfill_job_from_binance(
         )
         if upsert_rows:
             session.execute(text(UPSERT_CANDLE_SQL), upsert_rows)
-            session.commit()
             inserted += len(upsert_rows)
 
         if not upsert_rows:
@@ -698,7 +709,9 @@ async def reconcile_klines() -> dict[str, Any]:
     settings = Settings()
     session_factory = create_session_factory(settings)
     policy = _backfill_policy_from_settings(settings)
-    base_url = os.environ.get("BINANCE_REST_URL", BINANCE_REST_URL).strip() or BINANCE_REST_URL
+    base_url = (
+        os.environ.get("BINANCE_REST_URL", BINANCE_REST_URL).strip() or BINANCE_REST_URL
+    )
 
     scheduled_jobs = 0
     processed_jobs = 0
@@ -717,7 +730,7 @@ async def reconcile_klines() -> dict[str, Any]:
         )
         fetched_requests = len(requests)
         gaps_by_symbol_tf = _build_gaps_from_requests(requests)
-        detect_symbols = _target_symbols_for_detection() | {
+        detect_symbols = _target_symbols_for_detection(session) | {
             str(item.symbol).upper() for item in requests
         }
         now_ms = _now_ms()
@@ -789,15 +802,29 @@ async def reconcile_klines() -> dict[str, Any]:
                         to_open_time_ms=int(job.to_open_time_ms),
                         shard_count=settings.shard_count,
                     )
-                    inserted_candles += inserted
-                    repo.record_http_result(
-                        job_id=job_id,
-                        http_status=200,
-                        now_ms=_now_ms(),
-                        policy=policy,
-                        headers=headers,
-                    )
+                    if inserted <= 0:
+                        session.rollback()
+                        failures += 1
+                        repo.record_http_result(
+                            job_id=job_id,
+                            http_status=424,
+                            now_ms=_now_ms(),
+                            policy=policy,
+                            headers=headers,
+                            error_message="binance returned no candles for requested gap window",
+                        )
+                    else:
+                        session.commit()
+                        inserted_candles += inserted
+                        repo.record_http_result(
+                            job_id=job_id,
+                            http_status=200,
+                            now_ms=_now_ms(),
+                            policy=policy,
+                            headers=headers,
+                        )
                 except _BinanceHttpError as exc:
+                    session.rollback()
                     failures += 1
                     repo.record_http_result(
                         job_id=job_id,
@@ -808,6 +835,7 @@ async def reconcile_klines() -> dict[str, Any]:
                         error_message=str(exc),
                     )
                 except Exception as exc:  # pragma: no cover - defensive guard
+                    session.rollback()
                     failures += 1
                     created_at_ms = _job_created_at_ms(job)
                     repo.record_http_result(
@@ -890,22 +918,8 @@ async def refresh_exchange_info() -> dict[str, Any]:
                 session.add(ExchangeInfoCache(**row))
                 inserted += 1
                 continue
-            existing.status = str(row["status"])
-            existing.base_asset = str(row["base_asset"])
-            existing.quote_asset = str(row["quote_asset"])
-            existing.price_tick_size = row["price_tick_size"]
-            existing.price_min = row["price_min"]
-            existing.price_max = row["price_max"]
-            existing.qty_step_size = row["qty_step_size"]
-            existing.qty_min = row["qty_min"]
-            existing.qty_max = row["qty_max"]
-            existing.min_notional = row["min_notional"]
-            existing.max_notional = row["max_notional"]
-            existing.order_types_json = row["order_types_json"]
-            existing.permissions_json = row["permissions_json"]
-            existing.filters_json = row["filters_json"]
-            existing.payload_json = row["payload_json"]
-            existing.fetched_at_ms = int(row["fetched_at_ms"])
+            for key, value in row.items():
+                setattr(existing, key, value)
             updated += 1
 
         session.commit()

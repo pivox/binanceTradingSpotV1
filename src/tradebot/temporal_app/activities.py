@@ -38,7 +38,6 @@ def _get_execution_mode() -> tuple[str, bool]:
 
 def _activity_log(level: str, event: str, **fields: Any) -> None:
     logger = activity.logger
-    # Ensure case-insensitivity for the log level method lookup
     log_method = getattr(logger, level.lower(), logger.info)
     if not fields:
         log_method(event)
@@ -46,8 +45,8 @@ def _activity_log(level: str, event: str, **fields: Any) -> None:
     try:
         log_method(event, **fields)
     except TypeError:
-        # Fallback for standard loggers that do not support arbitrary keyword arguments
-        log_method("%s %s", event, fields)
+        details = " ".join(f"{key}={value!r}" for key, value in sorted(fields.items()))
+        log_method("%s %s", event, details)
 
 
 # =========================
@@ -76,7 +75,13 @@ async def fetch_candle_close_events(
     Recommended: watermark cursor + ORDER BY open_time_ms / id.
     """
     # TODO: SELECT ... WHERE shard_id=? AND id > cursor LIMIT ?
-    activity.logger.info("fetch_candle_close_events shard=%s limit=%s", shard_id, limit)
+    _activity_log(
+        "info",
+        "fetch_candle_close_events",
+        shard_id=shard_id,
+        shard_count=shard_count,
+        limit=limit,
+    )
     return []
 
 
@@ -84,7 +89,7 @@ async def fetch_candle_close_events(
 async def mark_candle_close_events_processed(events: list[CandleCloseEvent]) -> None:
     """Mark consumed events (idempotent)."""
     # TODO: DELETE FROM candle_close_event WHERE (symbol,tf,open_time) IN (...)
-    activity.logger.info("mark events processed count=%s", len(events))
+    _activity_log("info", "mark_events_processed", count=len(events))
 
 
 # =========================
@@ -136,7 +141,7 @@ async def load_mtf_state(symbol: str) -> MtfState:
 @activity.defn(name="save_mtf_state")
 async def save_mtf_state(state: MtfState) -> None:
     # TODO: UPSERT mtf_state
-    activity.logger.info("save_mtf_state symbol=%s", state.symbol)
+    _activity_log("info", "save_mtf_state", symbol=state.symbol)
 
 
 # =========================
@@ -286,7 +291,7 @@ async def update_position_after_actions(
     position_id: str, patch: dict[str, Any]
 ) -> None:
     # TODO: UPDATE position SET ...
-    activity.logger.info("update_position %s patch=%s", position_id, patch)
+    _activity_log("info", "update_position", position_id=position_id, patch=patch)
 
 
 # =========================

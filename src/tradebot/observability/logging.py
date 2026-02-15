@@ -21,7 +21,11 @@ def resolve_log_level(raw_level: str | None, *, default: str = "INFO") -> int:
 
 def configure_logging(*, level: str = "INFO") -> None:
     level_no = resolve_log_level(level)
-    logging.basicConfig(level=level_no, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", force=True)
+    logging.basicConfig(
+        level=level_no,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
+    )
     structlog.configure(
         processors=[
             structlog.stdlib.filter_by_level,

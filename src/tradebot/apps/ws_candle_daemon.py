@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 import structlog
 import websockets
 
-from tradebot.config.settings import Settings
 from tradebot.observability.logging import configure_logging
 from tradebot.observability.metrics import (
     WS_BOOT_SLOW_TOTAL,
@@ -535,8 +534,11 @@ async def ws_loop() -> None:
 
 def main() -> None:
     load_dotenv()
-    settings = Settings()
-    daemon_log_level = settings.daemon_log_level or settings.log_level
+    daemon_log_level = (
+        os.environ.get("DAEMON_LOG_LEVEL", "").strip()
+        or os.environ.get("LOG_LEVEL", "").strip()
+        or "INFO"
+    )
     configure_logging(level=daemon_log_level)
     asyncio.run(ws_loop())
 

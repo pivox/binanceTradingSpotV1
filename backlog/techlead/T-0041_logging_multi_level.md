@@ -1,7 +1,7 @@
 ---
 id: T-0041
 title: "Logging multi-level configurable (global + API + daemon)"
-status: VALIDATED
+status: NEEDS_QA
 owner: dev
 links: ["T-0025", "T-0035"]
 ---
@@ -43,3 +43,16 @@ Commandes:
 - `poetry run ruff check .`
 - `poetry run ruff format .`
 - `poetry run pytest -q`
+
+## Journal Dev (2026-02-15) - Retours MR PR #14
+- `src/tradebot/observability/logging.py`
+  - Format stdlib enrichi dans `logging.basicConfig` pour conserver timestamp/niveau/logger sur les logs non-structlog.
+- `src/tradebot/temporal_app/activities.py`
+  - `_activity_log` rendu plus robuste (lookup niveau insensible a la casse + fallback propre).
+  - Uniformisation des logs des activities placeholders via `_activity_log`.
+- `src/tradebot/apps/ws_candle_daemon.py`
+  - Suppression de `Settings()` au bootstrap `main()` pour eviter la validation globale de config avant lancement daemon.
+  - Resolution du niveau de log daemon uniquement via variables d'environnement (`DAEMON_LOG_LEVEL` puis `LOG_LEVEL`).
+- `tests/unit/test_logging_config.py`
+  - Ajout de tests pour verifier la precedence `DAEMON_LOG_LEVEL`.
+  - Ajout d'un test de non-regression: `main()` daemon demarre meme si une variable de config non liee (ex: `API_PORT`) est invalide.

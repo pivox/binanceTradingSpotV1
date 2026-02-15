@@ -1,7 +1,7 @@
 ---
 id: T-0031
 title: "Backend - Orchestrateur backfill runtime avec priorisation et rate-limit"
-status: TODO
+status: NEEDS_QA
 owner: dev
 links: ["US-0006", "US-0005", "US-0007", "T-0029", "T-0023"]
 ---
@@ -49,3 +49,20 @@ Le repository backfill est en place (`BackfillRepoSql`), mais l'orchestration ru
 ## Definition of Done
 - Code merge avec `ruff check .`, `ruff format .`, `pytest -q` verts.
 - Documentation d'exploitation mise a jour (`docs/backfill-rate-limit.md` ou equivalent).
+
+## Journal Dev (2026-02-15) - Traitement retours PR #15
+- `src/tradebot/config/utils.py`
+  - Extraction de `get_app_config_path()` pour centraliser la resolution de `APP_CONFIG_PATH`.
+- `src/tradebot/apps/temporal_worker_main.py`
+  - Usage du helper partage pour charger `config/app.yaml` (suppression duplication locale).
+- `src/tradebot/apps/bootstrap_schedules_main.py`
+  - Usage du helper partage pour charger `config/app.yaml` (suppression duplication locale).
+- `src/tradebot/temporal_app/activities.py`
+  - `reconcile_klines`: si Binance retourne `200` avec payload vide, le job est desormais traite en echec (`http_status=424`) avec retry policy (plus de faux `DONE`).
+  - `reconcile_klines`: controle explicite des transactions par appelant (commit des candles uniquement apres succes du job, rollback sur erreurs HTTP/exception).
+  - `reconcile_klines`: quand `RECONCILE_SYMBOLS` est absent, scan de tous les symbols presents en base `candles`.
+  - `refresh_exchange_info`: simplification de la mise a jour `ExchangeInfoCache` via boucle dynamique sur `row.items()`.
+- `tests/unit/test_reconcile_klines_activity.py`
+  - Ajout tests non-regression:
+    - payload Binance vide => job non `DONE` et statut retry/cooldown/terminal.
+    - detection gaps multi-symboles quand `RECONCILE_SYMBOLS` est non defini.

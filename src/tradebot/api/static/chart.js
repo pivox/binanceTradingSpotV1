@@ -24,6 +24,10 @@ const symbolOverlayEl = document.getElementById("symbolOverlay");
 const symbolListEl = document.getElementById("symbolList");
 const symbolHelpEl = document.getElementById("symbolHelp");
 const symbolCloseBtnEl = document.getElementById("symbolCloseBtn");
+const symbolSearchInputEl = document.getElementById("symbolSearchInput");
+const symbolTrendFilterEl = document.getElementById("symbolTrendFilter");
+const symbolSortByEl = document.getElementById("symbolSortBy");
+const symbolSortDirectionEl = document.getElementById("symbolSortDirection");
 
 const state = {
   symbol: "",
@@ -32,6 +36,13 @@ const state = {
   timeframes: [...FALLBACK_TIMEFRAMES],
   symbols: [],
   symbolsLoaded: false,
+  symbolSearch: "",
+  symbolTrendFilter: "all",
+  symbolSortBy: "change_pct",
+  symbolSortDirection: "desc",
+  symbolMetrics: {},
+  symbolMetricsLoading: false,
+  symbolSearchTimerId: null,
   requestId: 0,
   overlayRequestId: 0,
   abortController: null,
@@ -107,6 +118,37 @@ async function fetchPayload(url, options = {}) {
 
 function formatPrice(value) {
   return Number(value).toFixed(4);
+}
+
+
+function formatSigned(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return "-";
+  }
+  if (number === 0) {
+    return "0.0000";
+  }
+  return (number > 0 ? "+" : "") + number.toFixed(4);
+}
+
+function formatSignedPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return "-";
+  }
+  if (number === 0) {
+    return "0.00%";
+  }
+  return (number > 0 ? "+" : "") + number.toFixed(2) + "%";
+}
+
+function computeTrend(changeValue) {
+  const value = Number(changeValue);
+  if (!Number.isFinite(value) || value === 0) {
+    return "flat";
+  }
+  return value > 0 ? "up" : "down";
 }
 
 function formatDate(ms) {
@@ -623,29 +665,153 @@ function getPairCandidates() {
   return [...symbols].sort((a, b) => a.localeCompare(b));
 }
 
+async function loadSymbolMetrics(timeframe) {
+  const symbols = getPairCandidates();
+  if (!symbols.length) {
+    state.symbolMetrics = {};
+    return;
+  }
+
+  state.symbolMetricsLoading = true;
+  const targetTimeframe = timeframe || state.timeframe || DEFAULT_TIMEFRAME;
+  const requests = symbols.map(async (symbol) => {
+    try {
+      const candles = await fetchCandles(symbol, targetTimeframe);
+      const last = candles[candles.length - 1] || null;
+      const previous = candles[candles.length - 2] || null;
+      const lastPrice = last ? Number(last.close) : NaN;
+      const previousPrice = previous ? Number(previous.close) : NaN;
+      const changeValue =
+        Number.isFinite(lastPrice) && Number.isFinite(previousPrice)
+          ? lastPrice - previousPrice
+          : NaN;
+      const changePct =
+        Number.isFinite(changeValue) && Number.isFinite(previousPrice) && previousPrice !== 0
+          ? (changeValue / previousPrice) * 100
+          : NaN;
+
+      return [
+        symbol,
+        {
+          symbol,
+          last_price: lastPrice,
+          change_value: changeValue,
+          change_pct: changePct,
+          trend: computeTrend(changeValue),
+        },
+      ];
+    } catch (_error) {
+      return [
+        symbol,
+        {
+          symbol,
+          last_price: NaN,
+          change_value: NaN,
+          change_pct: NaN,
+          trend: "flat",
+        },
+      ];
+    }
+  });
+
+  const entries = await Promise.all(requests);
+  if (!isOverlayOpen()) {
+    return;
+  }
+  state.symbolMetrics = Object.fromEntries(entries);
+  state.symbolMetricsLoading = false;
+}
+
+function pairSortValue(symbol, sortBy) {
+  const metrics = state.symbolMetrics[symbol] || {};
+  if (sortBy === "symbol") {
+    return symbol;
+  }
+  const value = Number(metrics[sortBy]);
+  return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+}
+
+function filterAndSortPairCandidates(candidates) {
+  const query = state.symbolSearch.trim().toUpperCase();
+  const trendFilter = state.symbolTrendFilter;
+  const sortBy = state.symbolSortBy;
+  const direction = state.symbolSortDirection;
+
+  const filtered = candidates.filter((symbol) => {
+    if (query && !symbol.includes(query)) {
+      return false;
+    }
+    if (trendFilter === "all") {
+      return true;
+    }
+    const trend = state.symbolMetrics[symbol]?.trend || "flat";
+    return trend === trendFilter;
+  });
+
+  filtered.sort((a, b) => {
+    const left = pairSortValue(a, sortBy);
+    const right = pairSortValue(b, sortBy);
+
+    if (sortBy === "symbol") {
+      const cmp = String(left).localeCompare(String(right));
+      return direction === "asc" ? cmp : -cmp;
+    }
+
+    const cmp = Number(right) - Number(left);
+    return direction === "asc" ? -cmp : cmp;
+  });
+
+  return filtered;
+}
+
+function makeSymbolMetricCell(text, extraClass = "") {
+  const span = document.createElement("span");
+  span.className = "symbol-cell" + (extraClass ? " " + extraClass : "");
+  span.textContent = text;
+  return span;
+}
+
 function renderPairList() {
   symbolListEl.innerHTML = "";
-  const candidates = getPairCandidates();
+  const candidates = filterAndSortPairCandidates(getPairCandidates());
 
   if (candidates.length === 0) {
     const empty = document.createElement("div");
     empty.className = "symbol-empty";
-    empty.textContent = "Aucune pair disponible en base.";
+    empty.textContent = "Aucune pair disponible avec les filtres actuels.";
     symbolListEl.appendChild(empty);
-    symbolHelpEl.textContent = "Liste vide";
+    symbolHelpEl.textContent = "Ajuster la recherche/les filtres.";
     return [];
   }
 
-  symbolHelpEl.textContent = "Naviguer avec Haut/Bas, Enter pour choisir, Escape pour fermer.";
+  symbolHelpEl.textContent =
+    "Lignes cliquables -> chart pair | Haut/Bas/Home/End pour naviguer | Enter pour choisir.";
 
   for (const symbol of candidates) {
+    const metrics = state.symbolMetrics[symbol] || {};
     const button = document.createElement("button");
     button.type = "button";
     button.className = "symbol-item" + (symbol === state.symbol ? " active" : "");
     button.dataset.symbol = symbol;
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", symbol === state.symbol ? "true" : "false");
-    button.textContent = symbol;
+
+    const symbolName = makeSymbolMetricCell(symbol, "symbol-name");
+    const priceText = Number.isFinite(metrics.last_price)
+      ? formatPrice(metrics.last_price)
+      : "-";
+    const priceCell = makeSymbolMetricCell("Prix: " + priceText);
+
+    const changeCell = makeSymbolMetricCell(
+      "Var: " + formatSigned(metrics.change_value),
+      "trend-" + (metrics.trend || "flat")
+    );
+    const pctCell = makeSymbolMetricCell(
+      "Var %: " + formatSignedPercent(metrics.change_pct),
+      "trend-" + (metrics.trend || "flat")
+    );
+
+    button.append(symbolName, priceCell, changeCell, pctCell);
     button.addEventListener("click", () => {
       void selectPair(symbol);
     });
@@ -665,16 +831,30 @@ function focusPairButton(symbol) {
   }
 }
 
+function updateSortDirectionButtonLabel() {
+  symbolSortDirectionEl.textContent =
+    "Ordre: " + (state.symbolSortDirection === "asc" ? "Asc" : "Desc");
+}
+
+function syncPairControls() {
+  symbolSearchInputEl.value = state.symbolSearch;
+  symbolTrendFilterEl.value = state.symbolTrendFilter;
+  symbolSortByEl.value = state.symbolSortBy;
+  updateSortDirectionButtonLabel();
+}
+
 async function openPairOverlay() {
   openOverlayContainer();
   symbolHelpEl.textContent = "Chargement des pairs...";
   symbolListEl.innerHTML = "";
+  syncPairControls();
 
   state.overlayRequestId += 1;
   const requestId = state.overlayRequestId;
 
   try {
     await ensureSymbolsLoaded();
+    await loadSymbolMetrics(state.timeframe || DEFAULT_TIMEFRAME);
   } catch (_error) {
     if (requestId !== state.overlayRequestId || !isOverlayOpen()) {
       return;
@@ -802,6 +982,39 @@ async function selectPair(nextSymbol) {
     timeframe: state.timeframe,
     showLoadingOverlay: true,
   });
+}
+
+function schedulePairListRender() {
+  if (!isOverlayOpen()) {
+    return;
+  }
+  renderPairList();
+}
+
+function handleSymbolSearchInput(event) {
+  state.symbolSearch = String(event.target.value || "");
+  if (state.symbolSearchTimerId != null) {
+    clearTimeout(state.symbolSearchTimerId);
+  }
+  state.symbolSearchTimerId = setTimeout(() => {
+    schedulePairListRender();
+  }, 180);
+}
+
+function handleSymbolTrendFilterChange(event) {
+  state.symbolTrendFilter = String(event.target.value || "all");
+  schedulePairListRender();
+}
+
+function handleSymbolSortByChange(event) {
+  state.symbolSortBy = String(event.target.value || "change_pct");
+  schedulePairListRender();
+}
+
+function handleSymbolSortDirectionToggle() {
+  state.symbolSortDirection = state.symbolSortDirection === "asc" ? "desc" : "asc";
+  updateSortDirectionButtonLabel();
+  schedulePairListRender();
 }
 
 function handleTimeframeKeyboard(event) {
@@ -942,6 +1155,10 @@ async function initChartPage() {
   pairTriggerEl.addEventListener("keydown", handlePairTriggerKeydown);
   symbolListEl.addEventListener("keydown", handlePairListKeydown);
   symbolCloseBtnEl.addEventListener("click", () => closeOverlayContainer());
+  symbolSearchInputEl.addEventListener("input", handleSymbolSearchInput);
+  symbolTrendFilterEl.addEventListener("change", handleSymbolTrendFilterChange);
+  symbolSortByEl.addEventListener("change", handleSymbolSortByChange);
+  symbolSortDirectionEl.addEventListener("click", handleSymbolSortDirectionToggle);
   symbolOverlayEl.addEventListener("click", handleOverlayBackdropClick);
   symbolOverlayEl.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {

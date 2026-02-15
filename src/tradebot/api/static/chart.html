@@ -89,6 +89,38 @@
           </button>
         </div>
         <p id="symbolHelp" class="symbol-help">Chargement des pairs...</p>
+        <div class="symbol-controls">
+          <label class="control-field" for="symbolSearchInput">
+            <span>Recherche (type Select2)</span>
+            <input
+              id="symbolSearchInput"
+              type="search"
+              placeholder="Ex: BTCUSDC"
+              autocomplete="off"
+            />
+          </label>
+          <label class="control-field" for="symbolTrendFilter">
+            <span>Filtre variation</span>
+            <select id="symbolTrendFilter">
+              <option value="all">Toutes</option>
+              <option value="up">Hausse</option>
+              <option value="down">Baisse</option>
+              <option value="flat">Stable</option>
+            </select>
+          </label>
+          <label class="control-field" for="symbolSortBy">
+            <span>Trier par</span>
+            <select id="symbolSortBy">
+              <option value="symbol">Pair</option>
+              <option value="last_price">Dernier prix</option>
+              <option value="change_value">Variation</option>
+              <option value="change_pct">Variation %</option>
+            </select>
+          </label>
+          <button id="symbolSortDirection" class="sort-direction" type="button">
+            Ordre: Desc
+          </button>
+        </div>
         <div id="symbolList" class="symbol-list" role="listbox" aria-label="Pairs disponibles"></div>
       </div>
     </div>

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from json import JSONDecodeError
 from hmac import compare_digest
 from pathlib import Path
 import re
@@ -42,6 +43,7 @@ SESSION_FACTORY_KEY = web.AppKey("session_factory", object)
 CHART_MAX_LIMIT_KEY = web.AppKey("chart_max_limit", int)
 INDICATOR_HISTORY_MAX_LIMIT_KEY = web.AppKey("indicator_history_max_limit", int)
 INDICATOR_SCHEMA_VERSION_KEY = web.AppKey("indicator_schema_version", str)
+EXECUTION_MODE_KEY = web.AppKey("execution_mode", str)
 
 SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,20}$")
 TIMEFRAME_RE = re.compile(r"^[1-9][0-9]*[mhdwM]$")
@@ -51,6 +53,16 @@ SLOW_REQUEST_THRESHOLD_MS = 2_000
 CORRELATION_ID_HEADER = "X-Correlation-ID"
 CORRELATION_ID_REQUEST_KEY = "correlation_id"
 RBAC_PROXY_TOKEN_HEADER = "X-RBAC-Proxy-Token"
+EXECUTION_MODES = {"live", "backtesting"}
+
+
+def _normalize_execution_mode(raw_mode: str) -> str:
+    mode = raw_mode.strip().lower()
+    if mode == "dry_run":
+        return "backtesting"
+    if mode in EXECUTION_MODES:
+        return mode
+    raise ValueError("execution mode must be one of: backtesting, live")
 
 
 def _error_status(code: str) -> int:
@@ -231,6 +243,7 @@ def create_app(settings: Settings) -> web.Application:
     configure_logging()
     logger = structlog.get_logger()
 
+    execution_mode = _normalize_execution_mode(settings.execution_mode)
     controller = DaemonController(
         pid_file=settings.daemon_pid_file,
         command=DaemonController.command_from_env(settings.daemon_command),
@@ -241,6 +254,7 @@ def create_app(settings: Settings) -> web.Application:
             "BINANCE_API_KEY": settings.binance_api_key,
             "BINANCE_API_SECRET": settings.binance_api_secret,
             "SHARD_COUNT": str(settings.shard_count),
+            "EXECUTION_MODE": execution_mode,
         },
     )
 
@@ -273,6 +287,7 @@ def create_app(settings: Settings) -> web.Application:
     app[CHART_MAX_LIMIT_KEY] = settings.chart_max_limit
     app[INDICATOR_HISTORY_MAX_LIMIT_KEY] = settings.indicator_history_max_limit
     app[INDICATOR_SCHEMA_VERSION_KEY] = settings.indicator_default_schema_version
+    app[EXECUTION_MODE_KEY] = execution_mode
     app[RBAC_ENABLED_KEY] = settings.rbac_enabled
     app[RBAC_ADMIN_USERS_KEY] = _csv_set(settings.rbac_admin_users)
     app[RBAC_OPERATOR_USERS_KEY] = _csv_set(settings.rbac_operator_users)
@@ -389,6 +404,96 @@ def create_app(settings: Settings) -> web.Application:
             result="success",
         )
         return _json_ok({"status": st.status, "pid": st.pid})
+
+    async def mode_status_handler(request: web.Request) -> web.Response:
+        log = _request_logger(request)
+        user = _user_from_request(request)
+        roles = _roles_for_user(user, request)
+
+        if not _is_allowed("status", roles, request):
+            log.info(
+                "daemon_mode_status",
+                user=user,
+                remote=request.remote,
+                result="denied",
+                endpoint="/daemon/mode",
+            )
+            return _json_err("permission_denied", "user not authorized")
+
+        mode = request.app[EXECUTION_MODE_KEY]
+        return _json_ok({"mode": mode, "modes": sorted(EXECUTION_MODES)})
+
+    async def mode_switch_handler(request: web.Request) -> web.Response:
+        ctrl: DaemonController = request.app[CONTROLLER_KEY]
+        log = _request_logger(request)
+        user = _user_from_request(request)
+        roles = _roles_for_user(user, request)
+
+        if not (request.app[RBAC_ENABLED_KEY] and roles.intersection(request.app[RBAC_ADMIN_USERS_KEY])):
+
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError:
+            return _json_err("invalid_request", "invalid JSON payload", status=400)
+
+        if not isinstance(payload, Mapping):
+            return _json_err(
+                "invalid_request",
+                "JSON payload must be an object",
+                status=400,
+            )
+
+        raw_mode = str(payload.get("mode", ""))
+        try:
+            mode = _normalize_execution_mode(raw_mode)
+        except ValueError as exc:
+            return _json_err("invalid_request", str(exc), status=400)
+
+        request.app[EXECUTION_MODE_KEY] = mode
+        ctrl.env_overrides["EXECUTION_MODE"] = mode
+        try:
+            daemon_status = ctrl.status()
+        except DaemonControlError as exc:
+            log.error(
+                "daemon_mode_switch",
+                user=user,
+                remote=request.remote,
+                result="daemon_control_error",
+                endpoint="/daemon/mode",
+                error=str(exc),
+            )
+            return _json_err("daemon_control_error", str(exc), status=500)
+
+        log.info(
+            "daemon_mode_switch",
+            user=user,
+            remote=request.remote,
+            result="success",
+            mode=mode,
+            daemon_status=daemon_status.status,
+        )
+        return _json_ok(
+            {
+                "mode": mode,
+                "daemon_status": daemon_status.status,
+                "applies_on_next_start": daemon_status.status != "stopped",
+            }
+        )
+        log.info(
+            "daemon_mode_switch",
+            user=user,
+            remote=request.remote,
+            result="success",
+            mode=mode,
+            daemon_status=daemon_status.status,
+        )
+        return _json_ok(
+            {
+                "mode": mode,
+                "daemon_status": daemon_status.status,
+                "applies_on_next_start": daemon_status.status != "stopped",
+            }
+        )
 
     async def chart_symbols_handler(request: web.Request) -> web.Response:
         log = _request_logger(request)
@@ -744,6 +849,8 @@ def create_app(settings: Settings) -> web.Application:
     app.router.add_get("/daemon/status", status_handler)
     app.router.add_post("/daemon/start", start_handler)
     app.router.add_post("/daemon/stop", stop_handler)
+    app.router.add_get("/daemon/mode", mode_status_handler)
+    app.router.add_post("/daemon/mode", mode_switch_handler)
     app.router.add_get("/chart/symbols", chart_symbols_handler)
     app.router.add_get("/chart/timeframes", chart_timeframes_handler)
     app.router.add_get("/chart/candles", chart_candles_handler)

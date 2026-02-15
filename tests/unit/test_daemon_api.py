@@ -9,8 +9,22 @@ from tradebot.api.app import CONTROLLER_KEY, create_app
 from tradebot.config.settings import Settings
 
 
-async def _call(app, method: str, path: str, headers: dict | None = None):
-    req = make_mocked_request(method, path, app=app, headers=headers)
+async def _call(
+    app,
+    method: str,
+    path: str,
+    headers: dict | None = None,
+    json_body: dict | list | str | int | float | bool | None = None,
+    raw_body: bytes | None = None,
+):
+    body = raw_body
+    req_headers = dict(headers or {})
+    if json_body is not None:
+        body = json.dumps(json_body).encode("utf-8")
+        req_headers.setdefault("Content-Type", "application/json")
+    req = make_mocked_request(method, path, app=app, headers=req_headers)
+    if body is not None:
+        req._read_bytes = body
     req["correlation_id"] = "test-correlation-id"
     resp = await app._handle(req)
     payload = json.loads(resp.body.decode("utf-8")) if resp.body else None
@@ -182,3 +196,56 @@ def test_rbac_allows_admin(tmp_path):
         assert payload["ok"] is True
 
     asyncio.run(_with_app(tmp_path, _case, settings=settings))
+
+
+def test_mode_switch_rejects_non_object_payload(tmp_path):
+    async def _case(app):
+        status, payload = await _call(
+            app,
+            "POST",
+            "/daemon/mode",
+            json_body=["live"],
+        )
+        assert status == 400
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "invalid_request"
+
+        status, payload = await _call(
+            app,
+            "POST",
+            "/daemon/mode",
+            json_body="live",
+        )
+        assert status == 400
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "invalid_request"
+
+    asyncio.run(_with_app(tmp_path, _case))
+
+
+def test_mode_status_and_switch(tmp_path):
+    async def _case(app):
+        status, payload = await _call(app, "GET", "/daemon/mode")
+        assert status == 200
+        assert payload["ok"] is True
+        assert payload["data"]["mode"] == "backtesting"
+        assert payload["data"]["modes"] == ["backtesting", "live"]
+
+        status, payload = await _call(app, "POST", "/daemon/mode", json_body={})
+        assert status == 400
+        assert payload["ok"] is False
+
+        status, payload = await _call(
+            app,
+            "POST",
+            "/daemon/mode",
+            json_body={"mode": "live"},
+        )
+        assert status == 200
+        assert payload["data"]["mode"] == "live"
+
+        status, payload = await _call(app, "GET", "/daemon/mode")
+        assert status == 200
+        assert payload["data"]["mode"] == "live"
+
+    asyncio.run(_with_app(tmp_path, _case))

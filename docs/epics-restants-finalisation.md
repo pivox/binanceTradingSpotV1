@@ -4,7 +4,7 @@
 - Source prioritaire: statuts backlog PO/TechLead/Bugs.
 - Verification de coherence avec le code et la documentation operationnelle existante (API/UI/CI deja presentes).
 - Ce document ne change pas le scope produit: il consolide uniquement ce qu'il reste a terminer.
-- Demande complementaire prise en compte: inclure explicitement le **moteur de validation des signaux** (regles MTF) dans les epics de finalisation.
+- Demande complementaire prise en compte: inclure explicitement le **moteur de validation de signaux** (regles MTF) dans les epics de finalisation.
 
 ## Constat rapide
 - Les US PO `US-0001` a `US-0008` sont encore marquees `TODO` cote backlog, meme si une partie importante du socle API/UI existe deja.
@@ -147,7 +147,7 @@ L'epic doit permettre au PO, au TechLead et a la QA de répondre à une question
 
 ### Criteres d'acceptation (Definition of Done)
 1. Un meme jeu d'entrees (dataset + config + seed) produit exactement les memes sorties de backtest.
-2. Le moteur couvre au minimum les US `US-0005`, `US-0006`, `US-0007` et la logique de validation des signaux (Epic 5).
+2. Le moteur couvre au minimum les US `US-0005`, `US-0006`, `US-0007` et la logique de validation de signaux (Epic 5).
 3. Le rapport de sortie contient au minimum les métriques suivantes :
   - `PnL`
   - `max_drawdown`
@@ -183,7 +183,7 @@ L'epic doit permettre au PO, au TechLead et a la QA de répondre à une question
 - PO: nouvelle US "Backtesting des strategies et des regles de validation".
 - Tech: ticket TechLead "Moteur/backtest runner + catalogues de scenarios + reporting".
 - QA: campagne de non-regression backtest integree a `T-0028`.
-- Liens fonctionnels: `US-0005`, `US-0006`, `US-0007`, `US-0008` + Epic 5 (validation des signaux).
+- Liens fonctionnels: `US-0005`, `US-0006`, `US-0007`, `US-0008` + Epic 5 (validation de signaux).
 
 ## Proposition d'ordre d'execution
 1. **Epic 1 + Epic 2 + Epic 3** en flux coordonne (coeur data + contrat API).
@@ -196,7 +196,7 @@ L'epic doit permettre au PO, au TechLead et a la QA de répondre à une question
 - Quel niveau de tolerance est accepte pour l'ecart numerique des indicateurs (epsilon par indicateur) ?
 - Quelle politique de versionning API appliquer en cas de changement de formule/metadonnee ?
 - Quelle volumetrie cible officielle du screener (200, 500, 1000 paires) pour verrouiller les NFR front ?
-- Quel format cible pour les regles de validation des signaux (YAML versionne, schema JSON, ou mix) ?
+- Quel format cible pour les regles de validation de signaux (YAML versionne, schema JSON, ou mix) ?
 - Souhaite-t-on plusieurs profils de validation (regular/aggressive/conservative) selectionnables au runtime ?
 - Quels jeux de donnees historiques de reference sont retenus pour les campagnes de backtesting (periode, paires, granularites) ?
 - Quels seuils minimaux de performance/risque definissent un "go" release (ex: max drawdown, Sharpe, taux de trades invalides) ?

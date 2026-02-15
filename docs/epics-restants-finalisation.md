@@ -148,7 +148,15 @@ L'epic doit permettre au PO, au TechLead et a la QA de repondre a une question s
 ### Criteres d'acceptation (Definition of Done)
 1. Un meme jeu d'entrees (dataset + config + seed) produit exactement les memes sorties de backtest.
 2. Le moteur couvre au minimum les US `US-0005`, `US-0006`, `US-0007` et la logique de validations signaux (Epic 5).
-3. Le rapport de sortie contient au minimum: `PnL`, `max_drawdown`, `hit_ratio`, `expectancy`, `exposure`, `turnover`, `fees`, `slippage`.
+3. Le rapport de sortie contient au minimum les métriques suivantes :
+  - `PnL`
+  - `max_drawdown`
+  - `hit_ratio`
+  - `expectancy`
+  - `exposure`
+  - `turnover`
+  - `fees`
+  - `slippage`
 4. Un mode "compare" fournit un diff baseline/candidate avec verdict explicite (`improved`, `neutral`, `degraded`).
 5. Les seuils de qualite definis par PO/TechLead sont executables en CI et bloquent en cas de regression.
 6. Chaque run est tracable (horodatage, version code, version regles, hash dataset, parametres).

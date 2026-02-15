@@ -47,3 +47,12 @@ Le daemon alimente en continu la table `candles`. L'UI doit se mettre à jour en
 ## Definition of Done
 - Code merge avec lint/format OK.
 - Documentation courte (paramètres de polling, comportements erreur/inactivité).
+
+## Journal Dev (2026-02-15) - Retours PR #16
+- `src/tradebot/api/static/chart.js`
+  - Suppression des styles inline indicateurs dans le JS; rendu aligne sur `chart.css` (separation presentation/logique).
+  - Suppression du retry `setTimeout` redondant au boot de la page (la boucle bootstrap periodique reste la source unique de retry).
+  - Protection de la boucle bootstrap indicateurs contre l'annulation en boucle des requetes lentes:
+    - ajout d'un garde `indicatorRequestInFlight`,
+    - les retries bootstrap n'annulent plus la requete active.
+  - Correction du fallback de selection initiale: un `pair` fourni par query string n'est retenu que si des bougies existent, sinon fallback sur le flux de decouverte.

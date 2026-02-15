@@ -81,3 +81,13 @@ US-0007 impose un contrat API stable/versionne avec representation explicite des
 
 ### Validation
 - Ajout test `test_indicators_and_metrics_are_rbac_protected` (controle acces + proxy non fiable refuse).
+
+## Journal Dev (2026-02-15) - Retours PR #16
+### Corrige
+- `src/tradebot/api/app.py`
+  - Hardening bootstrap `GET /indicators/latest` en cas de concurrence:
+    - si une insertion snapshot entre en conflit d'unicite (`IntegrityError`) pendant le bootstrap, rollback local puis relecture du latest snapshot au lieu d'un `500`.
+
+### Validation
+- `tests/unit/test_indicator_api.py`
+  - Ajout test non-regression `test_indicators_latest_handles_concurrent_bootstrap_conflict`.

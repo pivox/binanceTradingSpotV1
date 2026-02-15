@@ -128,7 +128,7 @@ PY
           start_ts="${CI_START_TS:-$end_ts}"
           ci_duration_sec=$((end_ts - start_ts))
           overall_status="success"
-          if [ "${LINT_OUTCOME}" = "failure" ] || [ "${TESTS_OUTCOME}" = "failure" ] || [ "${BUILD_OUTCOME}" = "failure" ]; then
+          if [ "${LINT_OUTCOME}" != "success" ] || [ "${TESTS_OUTCOME}" != "success" ] || [ "${BUILD_OUTCOME}" != "success" ]; then
             overall_status="failure"
           fi
           cat > artifacts/ci-summary.txt <<EOF

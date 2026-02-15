@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     temporal_address: str = "localhost:7233"
     binance_api_key: str = ""
     binance_api_secret: str = ""
-    execution_mode: str = "dry_run"
+    execution_mode: str = "backtesting"
     live_trading_approved: bool = False
     shard_count: int = 8
     api_host: str = "0.0.0.0"

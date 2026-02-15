@@ -16,11 +16,11 @@ def _intent() -> OrderIntent:
     )
 
 
-def test_default_dry_run(monkeypatch):
-    monkeypatch.setenv("EXECUTION_MODE", "dry_run")
+def test_default_backtesting(monkeypatch):
+    monkeypatch.setenv("EXECUTION_MODE", "backtesting")
     monkeypatch.delenv("LIVE_TRADING_APPROVED", raising=False)
     out = asyncio.run(place_order(_intent()))
-    assert out["mode"] == "dry_run"
+    assert out["mode"] == "backtesting"
 
 
 def test_live_blocked_without_approval(monkeypatch):
@@ -35,3 +35,10 @@ def test_live_allowed_with_approval(monkeypatch):
     monkeypatch.setenv("LIVE_TRADING_APPROVED", "true")
     out = asyncio.run(place_order(_intent()))
     assert out["mode"] == "live"
+
+
+def test_dry_run_alias_maps_to_backtesting(monkeypatch):
+    monkeypatch.setenv("EXECUTION_MODE", "dry_run")
+    monkeypatch.delenv("LIVE_TRADING_APPROVED", raising=False)
+    out = asyncio.run(place_order(_intent()))
+    assert out["mode"] == "backtesting"

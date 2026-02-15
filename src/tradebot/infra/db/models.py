@@ -135,3 +135,39 @@ class BackfillJob(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class ExchangeInfoCache(Base):
+    __tablename__ = "exchange_info_cache"
+
+    symbol = Column(String, primary_key=True)
+    status = Column(String, nullable=False, default="UNKNOWN")
+    base_asset = Column(String, nullable=False, default="")
+    quote_asset = Column(String, nullable=False, default="")
+
+    price_tick_size = Column(Numeric, nullable=True)
+    price_min = Column(Numeric, nullable=True)
+    price_max = Column(Numeric, nullable=True)
+
+    qty_step_size = Column(Numeric, nullable=True)
+    qty_min = Column(Numeric, nullable=True)
+    qty_max = Column(Numeric, nullable=True)
+
+    min_notional = Column(Numeric, nullable=True)
+    max_notional = Column(Numeric, nullable=True)
+
+    order_types_json = Column(JSON, nullable=False, default=list)
+    permissions_json = Column(JSON, nullable=False, default=list)
+    filters_json = Column(JSON, nullable=False, default=list)
+    payload_json = Column(JSON, nullable=False)
+    fetched_at_ms = Column(BigInteger, nullable=False)
+
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

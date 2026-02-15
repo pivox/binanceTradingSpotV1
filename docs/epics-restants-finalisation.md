@@ -121,7 +121,7 @@
 
 ### Vision PO
 Fournir une capacite de backtesting fiable, lisible et decisionnelle pour valider les strategies avant mise en production.
-L'epic doit permettre au PO, au TechLead et a la QA de repondre a une question simple: **"est-ce que cette version ameliore reellement le couple performance/risque ?"**
+L'epic doit permettre au PO, au TechLead et a la QA de répondre à une question simple : **"est-ce que cette version améliore réellement le couple performance/risque ?"**
 
 ### Probleme produit a resoudre
 - Les US actuelles couvrent bien la collecte, le calcul d'indicateurs, l'API et l'UI, mais pas encore la boucle d'evaluation historique complete.

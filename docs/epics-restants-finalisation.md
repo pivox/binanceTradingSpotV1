@@ -1,6 +1,6 @@
 # Epics restants pour finaliser le projet
 
-## Methodologie de lecture
+## Méthodologie de lecture
 - Source prioritaire: statuts backlog PO/TechLead/Bugs.
 - Verification de coherence avec le code et la documentation operationnelle existante (API/UI/CI deja presentes).
 - Ce document ne change pas le scope produit: il consolide uniquement ce qu'il reste a terminer.

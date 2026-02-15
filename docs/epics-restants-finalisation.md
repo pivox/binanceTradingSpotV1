@@ -78,7 +78,7 @@
 - PO: `US-0008`
 - Tech: `T-0026`, `T-0027`
 
-## Epic 5 - Moteur de validations de signaux MTF configurable (priorite P0)
+## Epic 5 - Moteur de validation de signaux MTF configurable (priorite P0)
 
 ### Pourquoi cet epic est restant
 - Le besoin existe fonctionnellement (validation de signaux avant execution), mais n'apparait pas encore comme epic PO explicite dans les US.

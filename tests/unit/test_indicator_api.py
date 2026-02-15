@@ -6,6 +6,7 @@ import sys
 
 from aiohttp.test_utils import make_mocked_request
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from tradebot.api.app import create_app
@@ -173,6 +174,40 @@ def test_indicators_latest_bootstraps_snapshot_from_candles_when_missing(tmp_pat
         assert status == 200
         assert payload["ok"] is True
         assert len(payload["data"]["items"]) == 1
+
+    asyncio.run(_with_app(settings, _case))
+
+
+def test_indicators_latest_handles_concurrent_bootstrap_conflict(tmp_path, monkeypatch):
+    db_url = f"sqlite:///{tmp_path / 'indicator_api_bootstrap_conflict.db'}"
+    _seed_candles(db_url, count=80)
+    settings = _build_settings(tmp_path, db_url)
+
+    original_upsert = IndicatorRepository.upsert_snapshot
+    injected = {"done": False}
+
+    def _upsert_then_conflict(self, *args, **kwargs):
+        row = original_upsert(self, *args, **kwargs)
+        if not injected["done"]:
+            injected["done"] = True
+            raise IntegrityError("simulated unique conflict", None, None)
+        return row
+
+    monkeypatch.setattr(
+        IndicatorRepository,
+        "upsert_snapshot",
+        _upsert_then_conflict,
+    )
+
+    async def _case(app):
+        status, payload, headers = await _call(
+            app, "GET", "/indicators/latest?symbol=BTCUSDC&timeframe=1m"
+        )
+        assert status == 200
+        assert payload["ok"] is True
+        assert headers.get("ETag")
+        assert payload["data"]["symbol"] == "BTCUSDC"
+        assert payload["data"]["timeframe"] == "1m"
 
     asyncio.run(_with_app(settings, _case))
 

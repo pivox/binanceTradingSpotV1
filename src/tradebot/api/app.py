@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from aiohttp import web
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 import structlog
 
@@ -247,7 +247,9 @@ def _request_logger(request: web.Request) -> structlog.BoundLogger:
 
 def _snapshot_payload_only(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        key: value for key, value in snapshot.items() if key not in SNAPSHOT_METADATA_FIELDS
+        key: value
+        for key, value in snapshot.items()
+        if key not in SNAPSHOT_METADATA_FIELDS
     }
 
 
@@ -297,14 +299,18 @@ def _build_and_store_latest_snapshot_from_candles(
     payload = _snapshot_payload_only(snapshot)
 
     repo = IndicatorRepository(session)
-    repo.upsert_snapshot(
-        symbol=symbol,
-        timeframe=timeframe,
-        close_time_ms=close_time_ms,
-        computed_at_ms=computed_at_ms,
-        schema_version=schema_version,
-        payload=payload,
-    )
+    try:
+        repo.upsert_snapshot(
+            symbol=symbol,
+            timeframe=timeframe,
+            close_time_ms=close_time_ms,
+            computed_at_ms=computed_at_ms,
+            schema_version=schema_version,
+            payload=payload,
+        )
+    except IntegrityError:
+        # Another concurrent request may have inserted the same snapshot first.
+        session.rollback()
     return repo.get_latest_snapshot(symbol=symbol, timeframe=timeframe)
 
 

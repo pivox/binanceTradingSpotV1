@@ -58,6 +58,7 @@ const state = {
   indicatorSnapshot: null,
   indicatorLastFetchedAtMs: 0,
   indicatorBootstrapTimerId: null,
+  indicatorRequestInFlight: false,
 };
 
 let chart = null;
@@ -337,28 +338,6 @@ function clearIndicators() {
   state.indicatorSnapshot = null;
 }
 
-function ensureIndicatorFallbackStyles() {
-  if (!indicatorGridEl) {
-    return;
-  }
-  const gridStyle = window.getComputedStyle(indicatorGridEl);
-  if (gridStyle.display !== "grid") {
-    indicatorGridEl.style.display = "grid";
-    indicatorGridEl.style.gridTemplateColumns = "repeat(auto-fit, minmax(170px, 1fr))";
-    indicatorGridEl.style.gap = "8px";
-    indicatorGridEl.style.fontFamily =
-      "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace";
-    indicatorGridEl.style.fontSize = "12px";
-  }
-
-  if (indicatorMetaEl && window.getComputedStyle(indicatorMetaEl).display !== "block") {
-    indicatorMetaEl.style.display = "block";
-    indicatorMetaEl.style.marginTop = "4px";
-    indicatorMetaEl.style.color = "#4d5a74";
-    indicatorMetaEl.style.fontSize = "12px";
-  }
-}
-
 function stopIndicatorBootstrapLoop() {
   if (state.indicatorBootstrapTimerId != null) {
     clearInterval(state.indicatorBootstrapTimerId);
@@ -376,7 +355,7 @@ function startIndicatorBootstrapLoop() {
     if (!state.symbol || !state.timeframe) {
       return;
     }
-    void refreshIndicators({ reason: "manual" });
+    void refreshIndicators({ reason: "bootstrap", allowAbortInFlight: false });
   }, 2000);
 }
 
@@ -422,32 +401,17 @@ function renderIndicatorPill({ label, node, note }) {
   const normalized = normalizeIndicatorNode(node);
   const pill = document.createElement("div");
   pill.className = "indicator-pill" + (normalized.status !== "available" ? " unavailable" : "");
-  pill.style.display = "grid";
-  pill.style.gap = "4px";
-  pill.style.padding = "8px 10px";
-  pill.style.borderRadius = "12px";
-  pill.style.border = "1px solid rgba(29, 37, 56, 0.12)";
-  pill.style.background = "rgba(255, 255, 255, 0.72)";
-  pill.style.minHeight = "56px";
 
   const labelEl = document.createElement("div");
   labelEl.className = "label";
   labelEl.textContent = label;
-  labelEl.style.color = "#4d5a74";
-  labelEl.style.fontSize = "11px";
-  labelEl.style.letterSpacing = "0.02em";
-  labelEl.style.textTransform = "uppercase";
 
   const valueEl = document.createElement("div");
   valueEl.className = "value";
-  valueEl.style.fontWeight = "700";
-  valueEl.style.fontSize = "13px";
   if (normalized.status === "available") {
     valueEl.textContent = formatNumber(normalized.value, indicatorDigits(note?.path || []));
   } else {
     valueEl.textContent = "-";
-    valueEl.style.color = "#4d5a74";
-    valueEl.style.fontWeight = "600";
     pill.title = "Indicateur indisponible: " + (normalized.reason || "unavailable");
   }
 
@@ -464,7 +428,6 @@ function renderIndicatorPill({ label, node, note }) {
 }
 
 function renderIndicators(snapshot, lastCandleCloseTimeMs) {
-  ensureIndicatorFallbackStyles();
   indicatorGridEl.innerHTML = "";
   if (!snapshot) {
     clearIndicators();
@@ -537,9 +500,12 @@ async function fetchLatestIndicators(symbol, timeframe, signal) {
   );
 }
 
-async function refreshIndicators({ reason = "manual" } = {}) {
+async function refreshIndicators({ reason = "manual", allowAbortInFlight = true } = {}) {
   if (!state.symbol || !state.timeframe) {
     clearIndicators();
+    return;
+  }
+  if (state.indicatorRequestInFlight && !allowAbortInFlight) {
     return;
   }
 
@@ -547,9 +513,10 @@ async function refreshIndicators({ reason = "manual" } = {}) {
   const requestId = state.indicatorRequestId;
 
   try {
-    if (state.indicatorAbortController) {
+    if (state.indicatorAbortController && allowAbortInFlight) {
       state.indicatorAbortController.abort();
     }
+    state.indicatorRequestInFlight = true;
     state.indicatorAbortController = new AbortController();
     setIndicatorStatus(
       reason === "live" ? "Indicateurs: rafraichissement..." : "Indicateurs: chargement...",
@@ -581,6 +548,10 @@ async function refreshIndicators({ reason = "manual" } = {}) {
     indicatorGridEl.innerHTML = "";
     setIndicatorStatus("Indicateurs: indisponibles (retry auto)", "err");
     console.error("indicator_latest_error", error);
+  } finally {
+    if (requestId === state.indicatorRequestId) {
+      state.indicatorRequestInFlight = false;
+    }
   }
 }
 
@@ -1856,7 +1827,7 @@ async function resolveInitialSelection(preferredSymbol = "", preferredTimeframe 
         : options[0];
     if (timeframe) {
       const candles = await fetchCandles(initialSymbol, timeframe);
-      if (candles.length > 0 || initialSymbol !== DEFAULT_SYMBOL) {
+      if (candles.length > 0) {
         return {
           symbol: initialSymbol,
           timeframe,
@@ -1969,11 +1940,6 @@ async function initChartPage() {
 
     refreshChartFromState({ showEmptyOverlay: true });
     void refreshIndicators({ reason: "manual" });
-    setTimeout(() => {
-      if (!state.indicatorSnapshot) {
-        void refreshIndicators({ reason: "manual" });
-      }
-    }, 1500);
     setTimeframeHint("Active: " + state.timeframe);
     setLiveUpdateNow();
     restartLiveUpdater();

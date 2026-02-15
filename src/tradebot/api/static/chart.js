@@ -17,6 +17,9 @@ const ohlcOpenEl = document.getElementById("ohlcOpen");
 const ohlcHighEl = document.getElementById("ohlcHigh");
 const ohlcLowEl = document.getElementById("ohlcLow");
 const ohlcCloseEl = document.getElementById("ohlcClose");
+const indicatorMetaEl = document.getElementById("indicatorMeta");
+const indicatorStatusEl = document.getElementById("indicatorStatus");
+const indicatorGridEl = document.getElementById("indicatorGrid");
 const timeframeSwitchEl = document.getElementById("timeframeSwitch");
 const timeframeHintEl = document.getElementById("timeframeHint");
 const pairTriggerEl = document.getElementById("pairTrigger");
@@ -49,6 +52,10 @@ const state = {
   liveGeneration: 0,
   liveTimerId: null,
   liveAbortController: null,
+  indicatorRequestId: 0,
+  indicatorAbortController: null,
+  indicatorSnapshot: null,
+  indicatorLastFetchedAtMs: 0,
 };
 
 let chart = null;
@@ -73,6 +80,11 @@ function setLiveUpdateNow() {
 function setLiveStatus(message, tone = "idle") {
   liveStatusValueEl.textContent = message;
   liveStatusValueEl.className = "live-status " + tone;
+}
+
+function setIndicatorStatus(message, tone = "idle") {
+  indicatorStatusEl.textContent = message;
+  indicatorStatusEl.className = "indicator-status " + tone;
 }
 
 function setPairTriggerLabel(symbol) {
@@ -121,6 +133,13 @@ function formatPrice(value) {
   return Number(value).toFixed(4);
 }
 
+function formatNumber(value, digits) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return "-";
+  }
+  return number.toFixed(digits);
+}
 
 function formatSigned(value) {
   const number = Number(value);
@@ -158,6 +177,15 @@ function formatDate(ms) {
     return "-";
   }
   return new Date(value).toLocaleString();
+}
+
+function getLastCloseTimeMs(candles) {
+  if (!candles.length) {
+    return null;
+  }
+  const last = candles[candles.length - 1];
+  const ms = Number(last?.close_time_ms);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 function toCandleList(rows) {
@@ -257,6 +285,216 @@ function updateMeta(symbol, timeframe, candles) {
   ohlcCloseEl.textContent = "C: " + formatPrice(last.close);
 }
 
+function clearIndicators() {
+  indicatorMetaEl.textContent = "-";
+  indicatorGridEl.innerHTML = "";
+  setIndicatorStatus("Indicateurs: -", "idle");
+  state.indicatorSnapshot = null;
+}
+
+function normalizeIndicatorNode(node) {
+  if (!node || typeof node !== "object") {
+    return { status: "unavailable", reason: "missing" };
+  }
+  if (node.status === "available") {
+    return { status: "available", value: Number(node.value) };
+  }
+  if (node.status === "unavailable") {
+    return { status: "unavailable", reason: String(node.reason || "unavailable") };
+  }
+  return { status: "unavailable", reason: "invalid" };
+}
+
+function getIndicatorNode(snapshot, path) {
+  let current = snapshot;
+  for (const key of path) {
+    if (!current || typeof current !== "object") {
+      return null;
+    }
+    current = current[key];
+  }
+  return current;
+}
+
+function indicatorDigits(path) {
+  const joined = path.join(".");
+  if (joined === "rsi" || joined === "adx" || joined === "stoch_rsi.k" || joined === "stoch_rsi.d") {
+    return 2;
+  }
+  if (joined.startsWith("macd.")) {
+    return 6;
+  }
+  if (joined === "atr") {
+    return 6;
+  }
+  return 4;
+}
+
+function renderIndicatorPill({ label, node, note }) {
+  const normalized = normalizeIndicatorNode(node);
+  const pill = document.createElement("div");
+  pill.className = "indicator-pill" + (normalized.status !== "available" ? " unavailable" : "");
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "label";
+  labelEl.textContent = label;
+
+  const valueEl = document.createElement("div");
+  valueEl.className = "value";
+  if (normalized.status === "available") {
+    valueEl.textContent = formatNumber(normalized.value, indicatorDigits(note?.path || []));
+  } else {
+    valueEl.textContent = "-";
+    pill.title = "Indicateur indisponible: " + (normalized.reason || "unavailable");
+  }
+
+  pill.append(labelEl, valueEl);
+
+  if (note?.text) {
+    const noteEl = document.createElement("div");
+    noteEl.className = "note";
+    noteEl.textContent = note.text;
+    pill.append(noteEl);
+  }
+
+  return pill;
+}
+
+function renderIndicators(snapshot, lastCandleCloseTimeMs) {
+  indicatorGridEl.innerHTML = "";
+  if (!snapshot) {
+    clearIndicators();
+    return;
+  }
+
+  const closeTime = Number(snapshot.close_time);
+  const computedAt = Number(snapshot.computed_at);
+  const metaParts = [];
+  if (Number.isFinite(closeTime)) {
+    metaParts.push("close: " + formatDate(closeTime));
+  }
+  if (Number.isFinite(computedAt)) {
+    metaParts.push("computed: " + formatDate(computedAt));
+  }
+  if (lastCandleCloseTimeMs != null && Number.isFinite(closeTime)) {
+    const diff = lastCandleCloseTimeMs - closeTime;
+    if (diff > 0) {
+      metaParts.push("retard: " + Math.round(diff / 1000) + "s");
+    }
+  }
+  indicatorMetaEl.textContent = metaParts.length ? metaParts.join(" • ") : "-";
+
+  const defs = [
+    { label: "RSI(14)", path: ["rsi"] },
+    { label: "ATR(14)", path: ["atr"] },
+    { label: "ADX(14)", path: ["adx"] },
+    { label: "VWAP", path: ["vwap"] },
+    { label: "EMA(20)", path: ["ema20"] },
+    { label: "EMA(50)", path: ["ema50"] },
+    { label: "EMA(200)", path: ["ema200"] },
+    { label: "SMA(9)", path: ["sma9"] },
+    { label: "SMA(21)", path: ["sma21"] },
+    { label: "BB Upper", path: ["bollinger", "upper"] },
+    { label: "BB Middle", path: ["bollinger", "middle"] },
+    { label: "BB Lower", path: ["bollinger", "lower"] },
+    { label: "MACD", path: ["macd", "macd"] },
+    { label: "MACD Signal", path: ["macd", "signal"] },
+    { label: "MACD Hist", path: ["macd", "hist"] },
+    { label: "StochRSI K", path: ["stoch_rsi", "k"] },
+    { label: "StochRSI D", path: ["stoch_rsi", "d"] },
+    { label: "Pivot PP", path: ["pivots", "pp"] },
+    { label: "Pivot R1", path: ["pivots", "r1"] },
+    { label: "Pivot R2", path: ["pivots", "r2"] },
+    { label: "Pivot R3", path: ["pivots", "r3"] },
+    { label: "Pivot S1", path: ["pivots", "s1"] },
+    { label: "Pivot S2", path: ["pivots", "s2"] },
+    { label: "Pivot S3", path: ["pivots", "s3"] },
+  ];
+
+  for (const def of defs) {
+    const node = getIndicatorNode(snapshot, def.path);
+    indicatorGridEl.appendChild(
+      renderIndicatorPill({
+        label: def.label,
+        node,
+        note: { path: def.path, text: "" },
+      })
+    );
+  }
+}
+
+async function fetchLatestIndicators(symbol, timeframe, signal) {
+  return await fetchPayload(
+    "/indicators/latest?symbol=" +
+      encodeURIComponent(symbol) +
+      "&timeframe=" +
+      encodeURIComponent(timeframe),
+    { signal }
+  );
+}
+
+async function refreshIndicators({ reason = "manual" } = {}) {
+  if (!state.symbol || !state.timeframe) {
+    clearIndicators();
+    return;
+  }
+
+  state.indicatorRequestId += 1;
+  const requestId = state.indicatorRequestId;
+
+  if (state.indicatorAbortController) {
+    state.indicatorAbortController.abort();
+  }
+  state.indicatorAbortController = new AbortController();
+  setIndicatorStatus(reason === "live" ? "Indicateurs: rafraichissement..." : "Indicateurs: chargement...", "idle");
+
+  try {
+    const snapshot = await fetchLatestIndicators(
+      state.symbol,
+      state.timeframe,
+      state.indicatorAbortController.signal
+    );
+    if (requestId !== state.indicatorRequestId) {
+      return;
+    }
+    state.indicatorSnapshot = snapshot;
+    state.indicatorLastFetchedAtMs = Date.now();
+    renderIndicators(snapshot, getLastCloseTimeMs(state.candles));
+    setIndicatorStatus("Indicateurs: OK", "ok");
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return;
+    }
+    if (requestId !== state.indicatorRequestId) {
+      return;
+    }
+    state.indicatorSnapshot = null;
+    indicatorMetaEl.textContent = "-";
+    indicatorGridEl.innerHTML = "";
+    setIndicatorStatus("Indicateurs: indisponibles", "err");
+    console.error("indicator_latest_error", error);
+  }
+}
+
+function maybeRefreshIndicatorsAfterLiveUpdate() {
+  if (!state.symbol || !state.timeframe) {
+    return;
+  }
+  const now = Date.now();
+  if (now - (state.indicatorLastFetchedAtMs || 0) < 2500) {
+    return;
+  }
+
+  const lastCandleClose = getLastCloseTimeMs(state.candles);
+  if (lastCandleClose == null) {
+    return;
+  }
+  const snapshotClose = Number(state.indicatorSnapshot?.close_time);
+  if (!Number.isFinite(snapshotClose) || snapshotClose < lastCandleClose) {
+    void refreshIndicators({ reason: "live" });
+  }
+}
+
 function getLastOpenTimeMs(candles) {
   if (!candles.length) {
     return null;
@@ -343,6 +581,7 @@ function refreshChartFromState({ showEmptyOverlay = true } = {}) {
   updateMeta(state.symbol, state.timeframe, candles);
   if (candles.length === 0) {
     chart.setData([]);
+    clearIndicators();
     if (showEmptyOverlay) {
       showState(
         "empty",
@@ -364,6 +603,7 @@ async function fullReloadCurrentSelectionWithoutOverlay() {
     );
     state.candles = candles;
     refreshChartFromState({ showEmptyOverlay: true });
+    void refreshIndicators({ reason: "live" });
     setLiveUpdateNow();
     setLiveStatus("Live resynchronise", "ok");
   } catch (error) {
@@ -423,6 +663,7 @@ async function runLiveTick(generation) {
 
     state.candles = mergeCandles(state.candles, incoming);
     refreshChartFromState({ showEmptyOverlay: true });
+    maybeRefreshIndicatorsAfterLiveUpdate();
     setLiveStatus("Live: +" + incoming.length + " bougie(s)", "ok");
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -933,6 +1174,7 @@ async function loadAndRenderCandles({ symbol, timeframe, showLoadingOverlay }) {
     }
     state.candles = candles;
     refreshChartFromState({ showEmptyOverlay: true });
+    void refreshIndicators({ reason: "manual" });
     setTimeframeHint("Active: " + timeframe);
     setLiveUpdateNow();
     setLiveStatus("Live actif", "ok");
@@ -949,6 +1191,7 @@ async function loadAndRenderCandles({ symbol, timeframe, showLoadingOverlay }) {
     );
     setTimeframeHint("Erreur chargement");
     setLiveStatus("Live en attente", "idle");
+    clearIndicators();
     console.error("chart_candles_load_error", error);
   } finally {
     restartLiveUpdater();
@@ -1185,6 +1428,7 @@ async function initChartPage() {
   setTimeframeHint("Chargement des options...");
   setPairTriggerLabel("");
   setLiveStatus("Initialisation", "idle");
+  setIndicatorStatus("Initialisation", "idle");
 
   try {
     const selection = await resolveInitialSelection();
@@ -1200,10 +1444,12 @@ async function initChartPage() {
       refreshChartFromState({ showEmptyOverlay: true });
       setTimeframeHint("Aucune donnee");
       setLiveStatus("Live inactif", "idle");
+      clearIndicators();
       return;
     }
 
     refreshChartFromState({ showEmptyOverlay: true });
+    void refreshIndicators({ reason: "manual" });
     setTimeframeHint("Active: " + state.timeframe);
     setLiveUpdateNow();
     restartLiveUpdater();
@@ -1218,6 +1464,7 @@ async function initChartPage() {
     );
     setTimeframeHint("Erreur chargement");
     setLiveStatus("Live en attente", "idle");
+    clearIndicators();
     console.error("chart_init_error", error);
   }
 }

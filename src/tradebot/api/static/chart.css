@@ -220,6 +220,104 @@ body {
   padding: 4px 8px;
 }
 
+.indicator-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 10px;
+}
+
+.indicator-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.indicator-title {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.indicator-meta {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.indicator-status {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+}
+
+.indicator-status.ok {
+  color: var(--up);
+}
+
+.indicator-status.warn {
+  color: #a36c12;
+}
+
+.indicator-status.err {
+  color: var(--down);
+}
+
+.indicator-status.idle {
+  color: var(--muted);
+}
+
+.indicator-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 12px;
+}
+
+.indicator-pill {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  min-height: 56px;
+}
+
+.indicator-pill .label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.indicator-pill .value {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.indicator-pill.unavailable .value {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.indicator-pill .note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .chart-card {
   position: relative;
   border: 1px solid var(--line);

@@ -38,17 +38,16 @@ def _get_execution_mode() -> tuple[str, bool]:
 
 def _activity_log(level: str, event: str, **fields: Any) -> None:
     logger = activity.logger
-    log_method = getattr(logger, level)
-    try:
-        if fields:
-            log_method(event, **fields)
-        else:
-            log_method(event)
-    except TypeError:
-        if fields:
-            log_method("%s %s", event, fields)
-            return
+    # Ensure case-insensitivity for the log level method lookup
+    log_method = getattr(logger, level.lower(), logger.info)
+    if not fields:
         log_method(event)
+        return
+    try:
+        log_method(event, **fields)
+    except TypeError:
+        # Fallback for standard loggers that do not support arbitrary keyword arguments
+        log_method("%s %s", event, fields)
 
 
 # =========================

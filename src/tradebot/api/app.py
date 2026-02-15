@@ -429,15 +429,7 @@ def create_app(settings: Settings) -> web.Application:
         user = _user_from_request(request)
         roles = _roles_for_user(user, request)
 
-        if not _is_allowed("start", roles, request):
-            log.info(
-                "daemon_mode_switch",
-                user=user,
-                remote=request.remote,
-                result="denied",
-                endpoint="/daemon/mode",
-            )
-            return _json_err("permission_denied", "user not authorized")
+        if not (request.app[RBAC_ENABLED_KEY] and roles.intersection(request.app[RBAC_ADMIN_USERS_KEY])):
 
         try:
             payload = await request.json()

@@ -14,9 +14,10 @@ async def _call(
     method: str,
     path: str,
     headers: dict | None = None,
-    json_body: dict | None = None,
+    json_body: dict | list | str | int | float | bool | None = None,
+    raw_body: bytes | None = None,
 ):
-    body = None
+    body = raw_body
     req_headers = dict(headers or {})
     if json_body is not None:
         body = json.dumps(json_body).encode("utf-8")
@@ -195,6 +196,31 @@ def test_rbac_allows_admin(tmp_path):
         assert payload["ok"] is True
 
     asyncio.run(_with_app(tmp_path, _case, settings=settings))
+
+
+def test_mode_switch_rejects_non_object_payload(tmp_path):
+    async def _case(app):
+        status, payload = await _call(
+            app,
+            "POST",
+            "/daemon/mode",
+            json_body=["live"],
+        )
+        assert status == 400
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "invalid_request"
+
+        status, payload = await _call(
+            app,
+            "POST",
+            "/daemon/mode",
+            json_body="live",
+        )
+        assert status == 400
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "invalid_request"
+
+    asyncio.run(_with_app(tmp_path, _case))
 
 
 def test_mode_status_and_switch(tmp_path):

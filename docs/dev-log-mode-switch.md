@@ -26,3 +26,27 @@ Output:
 ```text
 (no output; exit code 0)
 ```
+
+### 3) Regression check for `/daemon/mode` payload validation
+
+```bash
+PYTHONPATH=src pytest tests/unit/test_daemon_api.py -q
+```
+
+Output:
+
+```text
+ERROR tests/unit/test_daemon_api.py - ModuleNotFoundError: No module named 'async_timeout'
+```
+
+### 4) Syntax check after `/daemon/mode` handler hardening
+
+```bash
+python -m py_compile src/tradebot/api/app.py tests/unit/test_daemon_api.py
+```
+
+Output:
+
+```text
+(no output; exit code 0)
+```

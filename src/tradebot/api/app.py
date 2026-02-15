@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from json import JSONDecodeError
 from hmac import compare_digest
 from pathlib import Path
 import re
@@ -440,8 +441,15 @@ def create_app(settings: Settings) -> web.Application:
 
         try:
             payload = await request.json()
-        except Exception:
+        except JSONDecodeError:
             return _json_err("invalid_request", "invalid JSON payload", status=400)
+
+        if not isinstance(payload, Mapping):
+            return _json_err(
+                "invalid_request",
+                "JSON payload must be an object",
+                status=400,
+            )
 
         raw_mode = str(payload.get("mode", ""))
         try:

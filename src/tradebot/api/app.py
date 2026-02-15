@@ -253,7 +253,8 @@ def _daemon_permissions_payload(
 
 
 def create_app(settings: Settings) -> web.Application:
-    configure_logging()
+    api_log_level = settings.api_log_level or settings.log_level
+    configure_logging(level=api_log_level)
     logger = structlog.get_logger()
 
     execution_mode = _normalize_execution_mode(settings.execution_mode)

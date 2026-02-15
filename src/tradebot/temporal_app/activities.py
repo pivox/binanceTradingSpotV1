@@ -36,6 +36,21 @@ def _get_execution_mode() -> tuple[str, bool]:
     return mode, approved
 
 
+def _activity_log(level: str, event: str, **fields: Any) -> None:
+    logger = activity.logger
+    log_method = getattr(logger, level)
+    try:
+        if fields:
+            log_method(event, **fields)
+        else:
+            log_method(event)
+    except TypeError:
+        if fields:
+            log_method("%s %s", event, fields)
+            return
+        log_method(event)
+
+
 # =========================
 # Helpers (placeholders)
 # =========================
@@ -155,7 +170,8 @@ async def create_buy_intent(symbol: str, open_time_ms: int) -> OrderIntent:
     intent_key = f"buy:{symbol}:{open_time_ms}"
     payload = {"order_type": "LIMIT", "quote_budget": 100.0}
     # TODO: UPSERT order_intent(intent_key UNIQUE)
-    activity.logger.info(
+    _activity_log(
+        "info",
         "signal_intent_created",
         intent_key=intent_key,
         side="BUY",
@@ -179,7 +195,8 @@ async def create_sell_intent(
     intent_key = f"sell:{position_id}:{lot_id}"
     payload = {"order_type": "LIMIT", "qty_pct": qty_pct, "lot_id": lot_id}
     # TODO: UPSERT order_intent
-    activity.logger.info(
+    _activity_log(
+        "info",
         "signal_intent_created",
         intent_key=intent_key,
         side="SELL",
@@ -208,7 +225,8 @@ async def place_order(intent: OrderIntent) -> dict[str, Any]:
     """
     mode, approved = _get_execution_mode()
     # TODO: call Binance REST, apply quantization, handle rate limits/retries.
-    activity.logger.info(
+    _activity_log(
+        "info",
         "place_order",
         side=intent.side,
         symbol=intent.symbol,
@@ -228,7 +246,8 @@ async def place_order(intent: OrderIntent) -> dict[str, Any]:
 async def cancel_order(symbol: str, order_id: str) -> dict[str, Any]:
     mode, approved = _get_execution_mode()
     # TODO: Binance cancel
-    activity.logger.info(
+    _activity_log(
+        "info",
         "cancel_order",
         symbol=symbol,
         order_id=order_id,

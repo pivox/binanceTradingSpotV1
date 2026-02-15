@@ -46,6 +46,12 @@ RBAC (optional):
 - Identify user with header `X-User` (override via `RBAC_USER_HEADER`)
 - Configure allowlists with `RBAC_ADMIN_USERS` and `RBAC_OPERATOR_USERS`
 
+Logging (multi-level):
+
+- `LOG_LEVEL` for global default level (`DEBUG|INFO|WARNING|ERROR|CRITICAL`)
+- `API_LOG_LEVEL` optional override for daemon API process
+- `DAEMON_LOG_LEVEL` optional override for websocket daemon process
+
 UI:
 
 - Open `http://API_HOST:API_PORT/` for the control panel (status daemon + switch live/backtesting)

@@ -92,6 +92,7 @@ function openOverlayContainer() {
 }
 
 function closeOverlayContainer({ restoreFocus = true } = {}) {
+  state.overlayRequestId += 1;
   symbolOverlayEl.classList.remove("visible");
   symbolOverlayEl.hidden = true;
   pairTriggerEl.setAttribute("aria-expanded", "false");
@@ -589,14 +590,14 @@ class CandleCanvasChart {
   }
 }
 
-async function fetchCandles(symbol, timeframe, signal) {
+async function fetchCandles(symbol, timeframe, signal, limit = DEFAULT_LIMIT) {
   const rows = await fetchPayload(
     "/chart/candles?symbol=" +
       encodeURIComponent(symbol) +
       "&timeframe=" +
       encodeURIComponent(timeframe) +
       "&limit=" +
-      DEFAULT_LIMIT,
+      encodeURIComponent(String(limit)),
     { signal }
   );
   return toCandleList(rows);
@@ -667,16 +668,21 @@ function getPairCandidates() {
 
 async function loadSymbolMetrics(timeframe) {
   const symbols = getPairCandidates();
+  const activeRequestId = state.overlayRequestId;
+  const targetTimeframe = timeframe || state.timeframe || DEFAULT_TIMEFRAME;
   if (!symbols.length) {
+    if (activeRequestId !== state.overlayRequestId || !isOverlayOpen()) {
+      return;
+    }
     state.symbolMetrics = {};
     return;
   }
 
   state.symbolMetricsLoading = true;
-  const targetTimeframe = timeframe || state.timeframe || DEFAULT_TIMEFRAME;
+  symbolHelpEl.textContent = "Chargement des variations en cours...";
   const requests = symbols.map(async (symbol) => {
     try {
-      const candles = await fetchCandles(symbol, targetTimeframe);
+      const candles = await fetchCandles(symbol, targetTimeframe, null, 2);
       const last = candles[candles.length - 1] || null;
       const previous = candles[candles.length - 2] || null;
       const lastPrice = last ? Number(last.close) : NaN;
@@ -715,11 +721,19 @@ async function loadSymbolMetrics(timeframe) {
   });
 
   const entries = await Promise.all(requests);
-  if (!isOverlayOpen()) {
+  if (
+    !isOverlayOpen() ||
+    activeRequestId !== state.overlayRequestId ||
+    targetTimeframe !== state.timeframe
+  ) {
+    state.symbolMetricsLoading = false;
     return;
   }
   state.symbolMetrics = Object.fromEntries(entries);
   state.symbolMetricsLoading = false;
+  symbolHelpEl.textContent =
+    "Lignes cliquables -> chart pair | Haut/Bas/Home/End pour naviguer | Enter pour choisir.";
+  renderPairList();
 }
 
 function pairSortValue(symbol, sortBy) {
@@ -854,7 +868,12 @@ async function openPairOverlay() {
 
   try {
     await ensureSymbolsLoaded();
-    await loadSymbolMetrics(state.timeframe || DEFAULT_TIMEFRAME);
+    if (requestId !== state.overlayRequestId || !isOverlayOpen()) {
+      return;
+    }
+    renderPairList();
+    focusPairButton(state.symbol);
+    void loadSymbolMetrics(state.timeframe || DEFAULT_TIMEFRAME);
   } catch (_error) {
     if (requestId !== state.overlayRequestId || !isOverlayOpen()) {
       return;
@@ -862,12 +881,6 @@ async function openPairOverlay() {
     symbolHelpEl.textContent = "Erreur lors du chargement des pairs.";
   }
 
-  if (requestId !== state.overlayRequestId || !isOverlayOpen()) {
-    return;
-  }
-
-  renderPairList();
-  focusPairButton(state.symbol);
 }
 
 function movePairFocus(step) {

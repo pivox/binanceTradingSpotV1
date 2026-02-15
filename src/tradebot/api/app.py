@@ -287,6 +287,7 @@ def _build_and_store_latest_snapshot_from_candles(
             bootstrap_logger.warning(
                 "snapshot_bootstrap_skip_invalid_candle",
                 open_time_ms=candle.get("open_time_ms"),
+                error_type=type(exc).__name__,
                 error=str(exc),
             )
             continue

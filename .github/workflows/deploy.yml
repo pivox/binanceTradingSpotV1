@@ -10,6 +10,10 @@ on:
         options:
           - staging
           - production
+      rollback_sha:
+        description: "Optional SHA tag for rollback smoke (without ghcr.io prefix)"
+        required: false
+        type: string
 
 concurrency:
   group: deploy-${{ github.ref }}-${{ inputs.environment }}
@@ -71,8 +75,23 @@ if not any(run.get("conclusion") == "success" for run in runs):
 print("CI successful for this commit.")
 PY
 
-  deploy:
+  deploy_secrets_check:
     needs: [ci_gate]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Verify deploy secrets
+        env:
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+        run: |
+          if [ -z "${BINANCE_API_KEY}" ] || [ -z "${BINANCE_API_SECRET}" ]; then
+            echo "Missing required deploy secrets for environment=${{ inputs.environment }}"
+            exit 1
+          fi
+
+  deploy:
+    needs: [ci_gate, deploy_secrets_check]
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
@@ -107,17 +126,41 @@ PY
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  rollback_smoke:
+    needs: [deploy]
+    if: inputs.rollback_sha != ''
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run rollback smoke
+        run: |
+          chmod +x scripts/rollback_smoke.sh
+          scripts/rollback_smoke.sh "${{ github.repository }}" "${{ inputs.rollback_sha }}"
+
   notify_failure:
-    needs: [ci_gate, deploy]
-    if: always() && (needs.ci_gate.result == 'failure' || needs.deploy.result == 'failure')
+    needs: [ci_gate, deploy_secrets_check, deploy, rollback_smoke]
+    if: always() && (needs.ci_gate.result == 'failure' || needs.deploy_secrets_check.result == 'failure' || needs.deploy.result == 'failure' || needs.rollback_smoke.result == 'failure')
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           CI_GATE_RESULT: ${{ needs.ci_gate.result }}
+          DEPLOY_SECRETS_CHECK_RESULT: ${{ needs.deploy_secrets_check.result }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
+          ROLLBACK_SMOKE_RESULT: ${{ needs.rollback_smoke.result }}
           DEPLOY_ENV: ${{ inputs.environment }}
+          ROLLBACK_SHA: ${{ inputs.rollback_sha }}
         run: |
           if [ -z "${SLACK_WEBHOOK_URL}" ]; then
             echo "SLACK_WEBHOOK_URL not set; skipping alert."
@@ -127,24 +170,33 @@ PY
           failed_job="unknown"
           if [ "${CI_GATE_RESULT}" = "failure" ]; then
             failed_job="ci_gate"
+          elif [ "${DEPLOY_SECRETS_CHECK_RESULT}" = "failure" ]; then
+            failed_job="deploy_secrets_check"
           elif [ "${DEPLOY_RESULT}" = "failure" ]; then
             failed_job="deploy"
+          elif [ "${ROLLBACK_SMOKE_RESULT}" = "failure" ]; then
+            failed_job="rollback_smoke"
           fi
 
           error_summary="Deploy workflow failed."
           if [ "${failed_job}" = "ci_gate" ]; then
             error_summary="CI gate failed: no successful CI run found for this commit."
+          elif [ "${failed_job}" = "deploy_secrets_check" ]; then
+            error_summary="Deploy secrets check failed for target environment."
           elif [ "${failed_job}" = "deploy" ]; then
             error_summary="Deploy job failed (image build/push or auth issue)."
+          elif [ "${failed_job}" = "rollback_smoke" ]; then
+            error_summary="Rollback smoke failed (target rollback image not available)."
           fi
 
           MSG=$(cat <<EOF
-Deploy failed.
+event=workflow_failed
 workflow=${{ github.workflow }}
 run_id=${{ github.run_id }}
 job=${failed_job}
 ref=${{ github.ref }}
 env=${DEPLOY_ENV}
+rollback_sha=${ROLLBACK_SHA}
 error_summary=${error_summary}
 url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 EOF

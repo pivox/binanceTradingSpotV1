@@ -1,7 +1,7 @@
 ---
 id: B-0009
 title: "RSI(14) calcule une valeur avec 14 bougies au lieu de 15 (off-by-one)"
-status: TODO
+status: VALIDATED
 owner: qa
 links: ["B-0009", "T-0022", "US-0005"]
 ---

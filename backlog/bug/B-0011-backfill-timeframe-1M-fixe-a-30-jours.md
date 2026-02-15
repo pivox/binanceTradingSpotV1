@@ -1,7 +1,7 @@
 ---
 id: B-0011
 title: "Backfill: timeframe `1M` traite comme 30 jours fixes"
-status: TODO
+status: VALIDATED
 owner: qa
 links: ["B-0011", "T-0023", "US-0006"]
 ---

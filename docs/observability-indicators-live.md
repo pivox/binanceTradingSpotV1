@@ -33,3 +33,24 @@ Panels minimum:
 
 - Rules: `docs/alerts-indicators-live.yml`
 - Runbook: `docs/runbook-indicators-live.md`
+
+## Hardening Websocket (T-0035)
+
+Variables d'environnement operationnelles:
+
+1. `USDC_STREAMS_HARD_CAP` (defaut `1000`): nombre maximum de streams websocket autorises au boot.
+2. `WS_RECONNECT_BASE_DELAY_S` (defaut `2`): delai initial de reconnexion.
+3. `WS_RECONNECT_MAX_DELAY_S` (defaut `30`): plafond de backoff exponentiel.
+4. `BOOT_WARN_MS` (defaut `5000`): seuil de lenteur de boot websocket.
+
+Metriques exposees:
+
+1. `tradebot_ws_streams_selected` (gauge): nombre de streams selectionnes au demarrage.
+2. `tradebot_ws_reconnect_total` (counter): nombre total de tentatives de reconnexion.
+3. `tradebot_ws_boot_slow_total` (counter): nombre de boots websocket au-dela de `BOOT_WARN_MS`.
+
+Logs attendus pour diagnostic:
+
+1. `ws_boot_complete`: boot termine, inclut `streams`, `symbols_ms`, `subscribe_ms`, `boot_ms`.
+2. `ws_boot_slow`: boot lent, inclut `boot_ms`, `threshold_ms`, `streams`.
+3. `ws_reconnect_scheduled`: reconnexion planifiee, inclut `attempt`, `delay_s`, `previous_error`, `streams`.

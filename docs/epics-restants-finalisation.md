@@ -10,7 +10,7 @@
 - Les US PO `US-0001` a `US-0008` sont encore marquees `TODO` cote backlog, meme si une partie importante du socle API/UI existe deja.
 - Cote TechLead, l'axe CI/CD historique (TL-09 a TL-15) est largement cloture (`DONE`/`VALIDATED`).
 - Le chantier encore actif est surtout le bloc **indicateurs live** (moteur + backfill + contrat API + UI screener + QA de non-regression).
-- Un second chantier structurant reste a finaliser: **moteur de validations de signaux** configurable par regles (logique MTF/cascade, gouvernance des validations, traçabilite des decisions).
+- Un second chantier structurant reste a finaliser: **moteur de validation de signaux** configurable par regles (logique MTF/cascade, gouvernance des validations, traçabilite des decisions).
 
 ## Epic 1 - Fiabilisation du pipeline indicateurs live (priorite P0)
 
@@ -83,7 +83,7 @@
 ### Pourquoi cet epic est restant
 - Le besoin existe fonctionnellement (validation de signaux avant execution), mais n'apparait pas encore comme epic PO explicite dans les US.
 - Le code contient deja des briques (`signal_engine`, `exit_engine`, `services/mtf/cascade`) sans specification produit unifiee de type "catalogue de regles".
-- Demande complementaire exprimee: converger vers un moteur de validations declaratif (inspire d'une approche `validations.regular.yaml`) pour uniformiser les checks.
+- Demande complementaire exprimee: converger vers un moteur de validation declaratif (inspire d'une approche `validations.regular.yaml`) pour uniformiser les checks.
 
 ### Resultat attendu pour fermer l'epic
 - Contrat declaratif de regles de validation (format YAML/JSON versionne) couvrant les controles principaux:
@@ -147,7 +147,7 @@ L'epic doit permettre au PO, au TechLead et a la QA de répondre à une question
 
 ### Criteres d'acceptation (Definition of Done)
 1. Un meme jeu d'entrees (dataset + config + seed) produit exactement les memes sorties de backtest.
-2. Le moteur couvre au minimum les US `US-0005`, `US-0006`, `US-0007` et la logique de validations signaux (Epic 5).
+2. Le moteur couvre au minimum les US `US-0005`, `US-0006`, `US-0007` et la logique de validation des signaux (Epic 5).
 3. Le rapport de sortie contient au minimum les métriques suivantes :
   - `PnL`
   - `max_drawdown`
@@ -183,7 +183,7 @@ L'epic doit permettre au PO, au TechLead et a la QA de répondre à une question
 - PO: nouvelle US "Backtesting des strategies et des regles de validation".
 - Tech: ticket TechLead "Moteur/backtest runner + catalogues de scenarios + reporting".
 - QA: campagne de non-regression backtest integree a `T-0028`.
-- Liens fonctionnels: `US-0005`, `US-0006`, `US-0007`, `US-0008` + Epic 5 (validations signaux).
+- Liens fonctionnels: `US-0005`, `US-0006`, `US-0007`, `US-0008` + Epic 5 (validation des signaux).
 
 ## Proposition d'ordre d'execution
 1. **Epic 1 + Epic 2 + Epic 3** en flux coordonne (coeur data + contrat API).

@@ -99,6 +99,21 @@ def test_indicators_latest_supports_etag_304(tmp_path):
     asyncio.run(_with_app(settings, _case))
 
 
+def test_indicators_latest_on_fresh_db_returns_snapshot_not_found(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'fresh_indicator_api.db'}"
+    settings = _build_settings(tmp_path, db_url)
+
+    async def _case(app):
+        status, payload, _headers = await _call(
+            app, "GET", "/indicators/latest?symbol=BTCUSDC&timeframe=1m"
+        )
+        assert status == 404
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "snapshot_not_found"
+
+    asyncio.run(_with_app(settings, _case))
+
+
 def test_indicators_history_cursor_pagination(tmp_path):
     db_url = f"sqlite:///{tmp_path / 'indicator_api.db'}"
     _seed_snapshots(db_url)

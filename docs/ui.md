@@ -28,6 +28,8 @@
 ### Pair switch behavior
 
 - Clicking the active pair opens an overlay listing available symbols from DB
+- Overlay includes a search field (Select2-like UX), trend filters, and sort controls
+- Each row shows: `pair`, `dernier prix`, `variation`, `variation %`; rows are clickable and route to the chart context of that pair
 - Keyboard navigation in the list: `Up/Down/Home/End`, `Enter` to select, `Escape` to close
 - Selecting a pair closes the overlay and reloads candles while keeping the current timeframe
 

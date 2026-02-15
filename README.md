@@ -33,6 +33,8 @@ Endpoints:
 - `GET /daemon/status`
 - `POST /daemon/start`
 - `POST /daemon/stop`
+- `GET /daemon/mode`
+- `POST /daemon/mode` (payload `{ "mode": "backtesting" | "live" }`)
 - `GET /chart/symbols`
 - `GET /chart/timeframes?symbol=BTCUSDC`
 - `GET /chart/candles?symbol=BTCUSDC&timeframe=1m&limit=500&from_open_time_ms=0`
@@ -45,7 +47,7 @@ RBAC (optional):
 
 UI:
 
-- Open `http://API_HOST:API_PORT/` for the control panel
+- Open `http://API_HOST:API_PORT/` for the control panel (status daemon + switch live/backtesting)
 - Open `http://API_HOST:API_PORT/chart` for the candles chart page
 
 Chart API docs:

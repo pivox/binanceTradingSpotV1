@@ -227,6 +227,18 @@ def _request_logger(request: web.Request) -> structlog.BoundLogger:
     )
 
 
+def _daemon_permissions_payload(
+    user: str, roles: set[str], request: web.Request
+) -> dict:
+    return {
+        "user": user,
+        "roles": sorted(roles),
+        "can_read_status": _is_allowed("status", roles, request),
+        "can_start": _is_allowed("start", roles, request),
+        "can_stop": _is_allowed("stop", roles, request),
+    }
+
+
 def create_app(settings: Settings) -> web.Application:
     configure_logging()
     logger = structlog.get_logger()
@@ -316,6 +328,22 @@ def create_app(settings: Settings) -> web.Application:
             pid=st.pid,
         )
         return _json_ok({"status": st.status, "pid": st.pid})
+
+    async def permissions_handler(request: web.Request) -> web.Response:
+        log = _request_logger(request)
+        user = _user_from_request(request)
+        roles = _roles_for_user(user, request)
+        payload = _daemon_permissions_payload(user, roles, request)
+        log.info(
+            "daemon_permissions",
+            user=user,
+            remote=request.remote,
+            roles=payload["roles"],
+            can_read_status=payload["can_read_status"],
+            can_start=payload["can_start"],
+            can_stop=payload["can_stop"],
+        )
+        return _json_ok(payload)
 
     async def start_handler(request: web.Request) -> web.Response:
         ctrl: DaemonController = request.app[CONTROLLER_KEY]
@@ -742,6 +770,7 @@ def create_app(settings: Settings) -> web.Application:
         )
 
     app.router.add_get("/daemon/status", status_handler)
+    app.router.add_get("/daemon/permissions", permissions_handler)
     app.router.add_post("/daemon/start", start_handler)
     app.router.add_post("/daemon/stop", stop_handler)
     app.router.add_get("/chart/symbols", chart_symbols_handler)

@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from tradebot.api.app import create_app
 from tradebot.api.indicator_repository import IndicatorRepository
 from tradebot.config.settings import Settings
-from tradebot.infra.db.models import Base
+from tradebot.infra.db.models import Base, Candle
 
 
 def _build_settings(tmp_path, db_url: str) -> Settings:
@@ -47,6 +47,41 @@ def _seed_snapshots(db_url: str, *, count: int = 3) -> None:
                     "ema20": {"status": "available", "value": rsi_value + 10.0},
                 },
             )
+    engine.dispose()
+
+
+def _seed_candles(
+    db_url: str,
+    *,
+    symbol: str = "BTCUSDC",
+    timeframe: str = "1m",
+    count: int = 60,
+) -> None:
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    with session_factory() as session:
+        interval_ms = 60_000
+        for index in range(count):
+            open_time_ms = index * interval_ms
+            close_time_ms = open_time_ms + (interval_ms - 1)
+            base = 68_000 + index
+            session.add(
+                Candle(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    open_time_ms=open_time_ms,
+                    close_time_ms=close_time_ms,
+                    open=base,
+                    high=base + 10,
+                    low=base - 10,
+                    close=base + 1,
+                    volume=100 + index,
+                    is_partial=False,
+                    shard_id=0,
+                )
+            )
+        session.commit()
     engine.dispose()
 
 
@@ -110,6 +145,34 @@ def test_indicators_latest_on_fresh_db_returns_snapshot_not_found(tmp_path):
         assert status == 404
         assert payload["ok"] is False
         assert payload["error"]["code"] == "snapshot_not_found"
+
+    asyncio.run(_with_app(settings, _case))
+
+
+def test_indicators_latest_bootstraps_snapshot_from_candles_when_missing(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'indicator_api_bootstrap.db'}"
+    _seed_candles(db_url, count=80)
+    settings = _build_settings(tmp_path, db_url)
+
+    async def _case(app):
+        status, payload, headers = await _call(
+            app, "GET", "/indicators/latest?symbol=BTCUSDC&timeframe=1m"
+        )
+        assert status == 200
+        assert payload["ok"] is True
+        assert headers.get("ETag")
+        data = payload["data"]
+        assert data["symbol"] == "BTCUSDC"
+        assert data["timeframe"] == "1m"
+        assert data["schema_version"] == "1.0.0"
+        assert data["ema20"]["status"] == "available"
+
+        status, payload, _ = await _call(
+            app, "GET", "/indicators/history?symbol=BTCUSDC&timeframe=1m&limit=1"
+        )
+        assert status == 200
+        assert payload["ok"] is True
+        assert len(payload["data"]["items"]) == 1
 
     asyncio.run(_with_app(settings, _case))
 

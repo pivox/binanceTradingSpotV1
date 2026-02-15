@@ -7,6 +7,7 @@ from hmac import compare_digest
 from pathlib import Path
 import re
 from time import perf_counter, time
+from typing import Any
 from uuid import uuid4
 
 from aiohttp import web
@@ -29,6 +30,7 @@ from tradebot.observability.metrics import (
     INDICATOR_CACHE_REQUESTS,
     INDICATOR_SNAPSHOT_FRESHNESS_MS,
 )
+from tradebot.services.indicators.factory import CandleSample, build_indicator_snapshot
 
 CONTROLLER_KEY = web.AppKey("controller", DaemonController)
 LOGGER_KEY = web.AppKey("logger", structlog.BoundLogger)
@@ -49,11 +51,15 @@ SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,20}$")
 TIMEFRAME_RE = re.compile(r"^[1-9][0-9]*[mhdwM]$")
 CHART_DEFAULT_LIMIT = 500
 INDICATOR_HISTORY_DEFAULT_LIMIT = 100
+INDICATOR_BOOTSTRAP_LIMIT = 500
 SLOW_REQUEST_THRESHOLD_MS = 2_000
 CORRELATION_ID_HEADER = "X-Correlation-ID"
 CORRELATION_ID_REQUEST_KEY = "correlation_id"
 RBAC_PROXY_TOKEN_HEADER = "X-RBAC-Proxy-Token"
 EXECUTION_MODES = {"live", "backtesting"}
+SNAPSHOT_METADATA_FIELDS = frozenset(
+    {"schema_version", "symbol", "timeframe", "close_time", "computed_at"}
+)
 
 
 def _normalize_execution_mode(raw_mode: str) -> str:
@@ -237,6 +243,69 @@ def _request_logger(request: web.Request) -> structlog.BoundLogger:
         endpoint=request.path,
         method=request.method,
     )
+
+
+def _snapshot_payload_only(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value for key, value in snapshot.items() if key not in SNAPSHOT_METADATA_FIELDS
+    }
+
+
+def _build_and_store_latest_snapshot_from_candles(
+    session: Session,
+    *,
+    symbol: str,
+    timeframe: str,
+    schema_version: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    candles = ChartRepository(session).fetch_candles(
+        symbol=symbol,
+        timeframe=timeframe,
+        limit=INDICATOR_BOOTSTRAP_LIMIT,
+    )
+
+    samples: list[CandleSample] = []
+    for candle in candles:
+        if bool(candle.get("is_partial")):
+            continue
+        try:
+            samples.append(
+                CandleSample(
+                    open_time_ms=int(candle["open_time_ms"]),
+                    close_time_ms=int(candle["close_time_ms"]),
+                    open=float(candle["open"]),
+                    high=float(candle["high"]),
+                    low=float(candle["low"]),
+                    close=float(candle["close"]),
+                    volume=float(candle["volume"]),
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    if not samples:
+        return None, None
+
+    snapshot = build_indicator_snapshot(
+        symbol=symbol,
+        timeframe=timeframe,
+        candles=samples,
+        schema_version=schema_version,
+    )
+    close_time_ms = int(snapshot["close_time"])
+    computed_at_ms = int(snapshot["computed_at"])
+    payload = _snapshot_payload_only(snapshot)
+
+    repo = IndicatorRepository(session)
+    repo.upsert_snapshot(
+        symbol=symbol,
+        timeframe=timeframe,
+        close_time_ms=close_time_ms,
+        computed_at_ms=computed_at_ms,
+        schema_version=schema_version,
+        payload=payload,
+    )
+    return repo.get_latest_snapshot(symbol=symbol, timeframe=timeframe)
 
 
 def _daemon_permissions_payload(
@@ -718,10 +787,19 @@ def create_app(settings: Settings) -> web.Application:
             )
 
         try:
+            schema_version = request.app[INDICATOR_SCHEMA_VERSION_KEY]
             with _session_scope(request) as session:
-                payload, etag = IndicatorRepository(session).get_latest_snapshot(
+                repo = IndicatorRepository(session)
+                payload, etag = repo.get_latest_snapshot(
                     symbol=symbol, timeframe=timeframe
                 )
+                if payload is None or etag is None:
+                    payload, etag = _build_and_store_latest_snapshot_from_candles(
+                        session,
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        schema_version=schema_version,
+                    )
         except RuntimeError:
             result = "service_unavailable"
             return _json_indicator_err(

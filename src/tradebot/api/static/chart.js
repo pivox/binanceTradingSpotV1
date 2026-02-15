@@ -4,6 +4,7 @@ const DEFAULT_LIMIT = 500;
 const MAX_RENDER_CANDLES = 500;
 const FALLBACK_TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h"];
 const TIMEFRAME_RE = /^[1-9][0-9]*[mhdwM]$/;
+const SYMBOL_RE = /^[A-Z0-9]{2,20}$/;
 
 const chartStateEl = document.getElementById("chartState");
 const chartHostEl = document.getElementById("chartHost");
@@ -56,6 +57,7 @@ const state = {
   indicatorAbortController: null,
   indicatorSnapshot: null,
   indicatorLastFetchedAtMs: 0,
+  indicatorBootstrapTimerId: null,
 };
 
 let chart = null;
@@ -83,6 +85,9 @@ function setLiveStatus(message, tone = "idle") {
 }
 
 function setIndicatorStatus(message, tone = "idle") {
+  if (!indicatorStatusEl) {
+    return;
+  }
   indicatorStatusEl.textContent = message;
   indicatorStatusEl.className = "indicator-status " + tone;
 }
@@ -263,6 +268,45 @@ function normalizeSymbols(input) {
   return [...out].sort((a, b) => a.localeCompare(b));
 }
 
+function parseQuerySelection() {
+  const params = new URLSearchParams(window.location.search || "");
+  const rawSymbol = params.get("pair") || params.get("symbol") || "";
+  const rawTimeframe = params.get("timeframe") || "";
+  const symbol = String(rawSymbol).trim().toUpperCase();
+  const timeframe = String(rawTimeframe).trim();
+  return {
+    symbol: SYMBOL_RE.test(symbol) ? symbol : "",
+    timeframe: TIMEFRAME_RE.test(timeframe) ? timeframe : "",
+  };
+}
+
+function syncSelectionToQuery() {
+  const params = new URLSearchParams(window.location.search || "");
+  const symbol = String(state.symbol || "").trim().toUpperCase();
+  const timeframe = String(state.timeframe || "").trim();
+
+  if (SYMBOL_RE.test(symbol)) {
+    params.set("pair", symbol);
+    params.delete("symbol");
+  } else {
+    params.delete("pair");
+    params.delete("symbol");
+  }
+
+  if (TIMEFRAME_RE.test(timeframe)) {
+    params.set("timeframe", timeframe);
+  } else {
+    params.delete("timeframe");
+  }
+
+  const query = params.toString();
+  const nextUrl = window.location.pathname + (query ? "?" + query : "") + window.location.hash;
+  const currentUrl = window.location.pathname + window.location.search + window.location.hash;
+  if (nextUrl !== currentUrl) {
+    window.history.replaceState(null, "", nextUrl);
+  }
+}
+
 function updateMeta(symbol, timeframe, candles) {
   pairValueEl.textContent = symbol || "-";
   timeframeValueEl.textContent = timeframe || "-";
@@ -286,10 +330,54 @@ function updateMeta(symbol, timeframe, candles) {
 }
 
 function clearIndicators() {
+  stopIndicatorBootstrapLoop();
   indicatorMetaEl.textContent = "-";
   indicatorGridEl.innerHTML = "";
   setIndicatorStatus("Indicateurs: -", "idle");
   state.indicatorSnapshot = null;
+}
+
+function ensureIndicatorFallbackStyles() {
+  if (!indicatorGridEl) {
+    return;
+  }
+  const gridStyle = window.getComputedStyle(indicatorGridEl);
+  if (gridStyle.display !== "grid") {
+    indicatorGridEl.style.display = "grid";
+    indicatorGridEl.style.gridTemplateColumns = "repeat(auto-fit, minmax(170px, 1fr))";
+    indicatorGridEl.style.gap = "8px";
+    indicatorGridEl.style.fontFamily =
+      "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace";
+    indicatorGridEl.style.fontSize = "12px";
+  }
+
+  if (indicatorMetaEl && window.getComputedStyle(indicatorMetaEl).display !== "block") {
+    indicatorMetaEl.style.display = "block";
+    indicatorMetaEl.style.marginTop = "4px";
+    indicatorMetaEl.style.color = "#4d5a74";
+    indicatorMetaEl.style.fontSize = "12px";
+  }
+}
+
+function stopIndicatorBootstrapLoop() {
+  if (state.indicatorBootstrapTimerId != null) {
+    clearInterval(state.indicatorBootstrapTimerId);
+    state.indicatorBootstrapTimerId = null;
+  }
+}
+
+function startIndicatorBootstrapLoop() {
+  stopIndicatorBootstrapLoop();
+  state.indicatorBootstrapTimerId = setInterval(() => {
+    if (state.indicatorSnapshot) {
+      stopIndicatorBootstrapLoop();
+      return;
+    }
+    if (!state.symbol || !state.timeframe) {
+      return;
+    }
+    void refreshIndicators({ reason: "manual" });
+  }, 2000);
 }
 
 function normalizeIndicatorNode(node) {
@@ -334,17 +422,32 @@ function renderIndicatorPill({ label, node, note }) {
   const normalized = normalizeIndicatorNode(node);
   const pill = document.createElement("div");
   pill.className = "indicator-pill" + (normalized.status !== "available" ? " unavailable" : "");
+  pill.style.display = "grid";
+  pill.style.gap = "4px";
+  pill.style.padding = "8px 10px";
+  pill.style.borderRadius = "12px";
+  pill.style.border = "1px solid rgba(29, 37, 56, 0.12)";
+  pill.style.background = "rgba(255, 255, 255, 0.72)";
+  pill.style.minHeight = "56px";
 
   const labelEl = document.createElement("div");
   labelEl.className = "label";
   labelEl.textContent = label;
+  labelEl.style.color = "#4d5a74";
+  labelEl.style.fontSize = "11px";
+  labelEl.style.letterSpacing = "0.02em";
+  labelEl.style.textTransform = "uppercase";
 
   const valueEl = document.createElement("div");
   valueEl.className = "value";
+  valueEl.style.fontWeight = "700";
+  valueEl.style.fontSize = "13px";
   if (normalized.status === "available") {
     valueEl.textContent = formatNumber(normalized.value, indicatorDigits(note?.path || []));
   } else {
     valueEl.textContent = "-";
+    valueEl.style.color = "#4d5a74";
+    valueEl.style.fontWeight = "600";
     pill.title = "Indicateur indisponible: " + (normalized.reason || "unavailable");
   }
 
@@ -361,6 +464,7 @@ function renderIndicatorPill({ label, node, note }) {
 }
 
 function renderIndicators(snapshot, lastCandleCloseTimeMs) {
+  ensureIndicatorFallbackStyles();
   indicatorGridEl.innerHTML = "";
   if (!snapshot) {
     clearIndicators();
@@ -442,13 +546,16 @@ async function refreshIndicators({ reason = "manual" } = {}) {
   state.indicatorRequestId += 1;
   const requestId = state.indicatorRequestId;
 
-  if (state.indicatorAbortController) {
-    state.indicatorAbortController.abort();
-  }
-  state.indicatorAbortController = new AbortController();
-  setIndicatorStatus(reason === "live" ? "Indicateurs: rafraichissement..." : "Indicateurs: chargement...", "idle");
-
   try {
+    if (state.indicatorAbortController) {
+      state.indicatorAbortController.abort();
+    }
+    state.indicatorAbortController = new AbortController();
+    setIndicatorStatus(
+      reason === "live" ? "Indicateurs: rafraichissement..." : "Indicateurs: chargement...",
+      "idle"
+    );
+
     const snapshot = await fetchLatestIndicators(
       state.symbol,
       state.timeframe,
@@ -461,6 +568,7 @@ async function refreshIndicators({ reason = "manual" } = {}) {
     state.indicatorLastFetchedAtMs = Date.now();
     renderIndicators(snapshot, getLastCloseTimeMs(state.candles));
     setIndicatorStatus("Indicateurs: OK", "ok");
+    stopIndicatorBootstrapLoop();
   } catch (error) {
     if (error?.name === "AbortError") {
       return;
@@ -471,7 +579,7 @@ async function refreshIndicators({ reason = "manual" } = {}) {
     state.indicatorSnapshot = null;
     indicatorMetaEl.textContent = "-";
     indicatorGridEl.innerHTML = "";
-    setIndicatorStatus("Indicateurs: indisponibles", "err");
+    setIndicatorStatus("Indicateurs: indisponibles (retry auto)", "err");
     console.error("indicator_latest_error", error);
   }
 }
@@ -652,6 +760,7 @@ async function runLiveTick(generation) {
     setLiveUpdateNow();
 
     if (incoming.length === 0) {
+      maybeRefreshIndicatorsAfterLiveUpdate();
       setLiveStatus(hidden ? "Live ralenti (onglet inactif)" : "Live actif, pas de nouveaute", "idle");
       return;
     }
@@ -704,15 +813,58 @@ class CandleCanvasChart {
     this.width = 0;
     this.height = 0;
     this.palette = getComputedStyle(document.documentElement);
+    this.viewStart = 0;
+    this.viewCount = 0;
+    this.minVisibleCandles = 20;
+    this.hoverIndex = null;
+    this.hoverX = 0;
+    this.hoverY = 0;
+    this.layout = null;
+    this.isPanning = false;
+    this.panStartX = 0;
+    this.panStartViewStart = 0;
     this.hostEl.appendChild(this.canvas);
+    this.canvas.style.cursor = "crosshair";
 
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(this.hostEl);
+    this.canvas.addEventListener("mousemove", (event) => this.handleMouseMove(event));
+    this.canvas.addEventListener("mouseleave", () => this.handleMouseLeave());
+    this.canvas.addEventListener("mousedown", (event) => this.handleMouseDown(event));
+    this.canvas.addEventListener("dblclick", () => this.resetZoom());
+    this.canvas.addEventListener("wheel", (event) => this.handleWheel(event), {
+      passive: false,
+    });
+    window.addEventListener("mouseup", () => this.handleMouseUp());
     this.resize();
   }
 
   setData(data) {
+    const wasAtRightEdge = this.isAtRightEdge();
     this.data = data;
+    if (!this.data.length) {
+      this.viewStart = 0;
+      this.viewCount = 0;
+      this.hoverIndex = null;
+      this.layout = null;
+      this.draw();
+      return;
+    }
+
+    if (this.viewCount <= 0 || this.viewCount >= this.data.length) {
+      this.viewCount = this.data.length;
+      this.viewStart = 0;
+    } else {
+      this.viewCount = Math.min(this.viewCount, this.data.length);
+      if (wasAtRightEdge) {
+        this.viewStart = Math.max(0, this.data.length - this.viewCount);
+      } else {
+        this.viewStart = this.clampViewStart(this.viewStart);
+      }
+    }
+    if (this.hoverIndex != null && this.hoverIndex >= this.data.length) {
+      this.hoverIndex = this.data.length - 1;
+    }
     this.draw();
   }
 
@@ -736,6 +888,166 @@ class CandleCanvasChart {
     this.draw();
   }
 
+  isAtRightEdge() {
+    if (!this.data.length || this.viewCount <= 0) {
+      return true;
+    }
+    return this.viewStart + this.viewCount >= this.data.length - 1;
+  }
+
+  resetZoom() {
+    if (!this.data.length) {
+      return;
+    }
+    this.viewCount = this.data.length;
+    this.viewStart = 0;
+    this.draw();
+  }
+
+  clampViewStart(value) {
+    const maxStart = Math.max(0, this.data.length - this.viewCount);
+    return Math.min(maxStart, Math.max(0, value));
+  }
+
+  getVisibleSlice() {
+    if (!this.data.length) {
+      return { start: 0, data: [] };
+    }
+    const count =
+      this.viewCount > 0
+        ? Math.min(this.data.length, this.viewCount)
+        : this.data.length;
+    const start = this.clampViewStart(this.viewStart);
+    return {
+      start,
+      data: this.data.slice(start, start + count),
+    };
+  }
+
+  pointFromEvent(event) {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  }
+
+  isInsidePlot(x, y) {
+    if (!this.layout) {
+      return false;
+    }
+    return (
+      x >= this.layout.left &&
+      x <= this.layout.left + this.layout.plotWidth &&
+      y >= this.layout.top &&
+      y <= this.layout.top + this.layout.plotHeight
+    );
+  }
+
+  indexForX(x) {
+    if (!this.layout || !this.layout.visibleCount) {
+      return null;
+    }
+    const local = Math.floor((x - this.layout.left) / this.layout.step);
+    const clamped = Math.max(0, Math.min(this.layout.visibleCount - 1, local));
+    return this.layout.visibleStart + clamped;
+  }
+
+  handleMouseDown(event) {
+    if (!this.layout || this.viewCount >= this.data.length) {
+      return;
+    }
+    const point = this.pointFromEvent(event);
+    if (!this.isInsidePlot(point.x, point.y)) {
+      return;
+    }
+    this.isPanning = true;
+    this.panStartX = point.x;
+    this.panStartViewStart = this.viewStart;
+    this.canvas.style.cursor = "grabbing";
+  }
+
+  handleMouseUp() {
+    if (!this.isPanning) {
+      return;
+    }
+    this.isPanning = false;
+    this.canvas.style.cursor = "crosshair";
+  }
+
+  handleMouseLeave() {
+    if (this.isPanning) {
+      return;
+    }
+    if (this.hoverIndex == null) {
+      return;
+    }
+    this.hoverIndex = null;
+    this.draw();
+  }
+
+  handleMouseMove(event) {
+    const point = this.pointFromEvent(event);
+    this.hoverX = point.x;
+    this.hoverY = point.y;
+
+    if (this.isPanning && this.layout) {
+      const shift = Math.round((this.panStartX - point.x) / this.layout.step);
+      this.viewStart = this.clampViewStart(this.panStartViewStart + shift);
+      this.draw();
+      return;
+    }
+
+    if (!this.isInsidePlot(point.x, point.y)) {
+      if (this.hoverIndex != null) {
+        this.hoverIndex = null;
+        this.draw();
+      }
+      return;
+    }
+
+    const nextHover = this.indexForX(point.x);
+    if (nextHover == null || nextHover === this.hoverIndex) {
+      return;
+    }
+    this.hoverIndex = nextHover;
+    this.draw();
+  }
+
+  handleWheel(event) {
+    if (!this.data.length || !this.layout) {
+      return;
+    }
+    const point = this.pointFromEvent(event);
+    if (!this.isInsidePlot(point.x, point.y)) {
+      return;
+    }
+    event.preventDefault();
+
+    const currentCount = this.layout.visibleCount;
+    if (currentCount <= 0) {
+      return;
+    }
+    const anchorIndex =
+      this.indexForX(point.x) ?? this.viewStart + currentCount - 1;
+    const nextCount =
+      event.deltaY < 0
+        ? Math.max(this.minVisibleCandles, Math.floor(currentCount * 0.88))
+        : Math.min(this.data.length, Math.ceil(currentCount * 1.12));
+
+    if (nextCount === currentCount) {
+      return;
+    }
+    const relative =
+      currentCount <= 1
+        ? 0
+        : (anchorIndex - this.viewStart) / (currentCount - 1);
+    this.viewCount = nextCount;
+    const nextStart = Math.round(anchorIndex - relative * (nextCount - 1));
+    this.viewStart = this.clampViewStart(nextStart);
+    this.draw();
+  }
+
   draw() {
     const ctx = this.ctx;
     const width = this.width;
@@ -750,10 +1062,10 @@ class CandleCanvasChart {
       return;
     }
 
-    const marginTop = 20;
-    const marginBottom = 22;
-    const marginLeft = 14;
-    const marginRight = 66;
+    const marginTop = 16;
+    const marginBottom = 38;
+    const marginLeft = 12;
+    const marginRight = 78;
     const plotWidth = width - marginLeft - marginRight;
     const plotHeight = height - marginTop - marginBottom;
 
@@ -761,8 +1073,14 @@ class CandleCanvasChart {
       return;
     }
 
-    const highs = this.data.map((item) => item.high);
-    const lows = this.data.map((item) => item.low);
+    const visible = this.getVisibleSlice();
+    const candles = visible.data;
+    if (!candles.length) {
+      return;
+    }
+
+    const highs = candles.map((item) => item.high);
+    const lows = candles.map((item) => item.low);
     const maxRaw = Math.max(...highs);
     const minRaw = Math.min(...lows);
     const span = Math.max(1e-9, maxRaw - minRaw);
@@ -774,8 +1092,22 @@ class CandleCanvasChart {
     const yForPrice = (price) =>
       marginTop + ((maxPrice - price) / fullSpan) * plotHeight;
 
+    const step = plotWidth / candles.length;
+    this.layout = {
+      left: marginLeft,
+      top: marginTop,
+      plotWidth,
+      plotHeight,
+      step,
+      visibleStart: visible.start,
+      visibleCount: candles.length,
+      yForPrice,
+    };
+
     this.drawGrid(ctx, marginLeft, marginTop, plotWidth, plotHeight, minPrice, maxPrice);
-    this.drawCandles(ctx, marginLeft, plotWidth, yForPrice);
+    this.drawCandles(ctx, candles, marginLeft, plotWidth, yForPrice);
+    this.drawTimeAxis(ctx, candles, marginLeft, marginTop + plotHeight, plotWidth);
+    this.drawHover(ctx);
   }
 
   drawGrid(ctx, left, top, plotWidth, plotHeight, minPrice, maxPrice) {
@@ -802,15 +1134,15 @@ class CandleCanvasChart {
     }
   }
 
-  drawCandles(ctx, left, plotWidth, yForPrice) {
+  drawCandles(ctx, candles, left, plotWidth, yForPrice) {
     const upColor = this.palette.getPropertyValue("--up").trim() || "#15a35b";
     const downColor = this.palette.getPropertyValue("--down").trim() || "#d74747";
-    const n = this.data.length;
+    const n = candles.length;
     const step = plotWidth / n;
     const bodyWidth = Math.max(2, Math.min(14, step * 0.64));
 
     for (let i = 0; i < n; i += 1) {
-      const candle = this.data[i];
+      const candle = candles[i];
       const x = left + (i + 0.5) * step;
       const wickTop = yForPrice(candle.high);
       const wickBottom = yForPrice(candle.low);
@@ -828,6 +1160,150 @@ class CandleCanvasChart {
       ctx.stroke();
       ctx.fillRect(x - bodyWidth / 2, bodyY, bodyWidth, bodyH);
     }
+  }
+
+  drawTimeAxis(ctx, candles, left, bottom, plotWidth) {
+    const lineColor = this.palette.getPropertyValue("--line").trim() || "#d0d7e8";
+    const textColor = this.palette.getPropertyValue("--muted").trim() || "#5e6d8f";
+    const n = candles.length;
+    if (n <= 0) {
+      return;
+    }
+
+    const step = plotWidth / n;
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(left, bottom);
+    ctx.lineTo(left + plotWidth, bottom);
+    ctx.stroke();
+
+    const tickCount = Math.min(6, n);
+    const rangeMs = Math.max(
+      0,
+      Number(candles[n - 1].open_time_ms) - Number(candles[0].open_time_ms)
+    );
+
+    ctx.fillStyle = textColor;
+    ctx.font = '11px "JetBrains Mono", monospace';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+
+    for (let i = 0; i < tickCount; i += 1) {
+      const index =
+        tickCount <= 1 ? 0 : Math.round((i / (tickCount - 1)) * (n - 1));
+      const candle = candles[index];
+      const x = left + (index + 0.5) * step;
+      const label = this.formatAxisTime(Number(candle.open_time_ms), rangeMs);
+
+      ctx.beginPath();
+      ctx.moveTo(x, bottom);
+      ctx.lineTo(x, bottom + 4);
+      ctx.stroke();
+      ctx.fillText(label, x, bottom + 6);
+    }
+  }
+
+  formatAxisTime(ms, rangeMs) {
+    if (!Number.isFinite(ms)) {
+      return "-";
+    }
+    const value = new Date(ms);
+    if (rangeMs <= 6 * 60 * 60 * 1000) {
+      return value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    if (rangeMs <= 3 * 24 * 60 * 60 * 1000) {
+      return value.toLocaleString([], {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+    return value.toLocaleDateString([], { day: "2-digit", month: "2-digit" });
+  }
+
+  drawHover(ctx) {
+    if (this.hoverIndex == null || !this.layout) {
+      return;
+    }
+    const local = this.hoverIndex - this.layout.visibleStart;
+    if (local < 0 || local >= this.layout.visibleCount) {
+      return;
+    }
+    const candle = this.data[this.hoverIndex];
+    if (!candle) {
+      return;
+    }
+
+    const x = this.layout.left + (local + 0.5) * this.layout.step;
+    const y = this.layout.yForPrice(candle.close);
+    const top = this.layout.top;
+    const bottom = top + this.layout.plotHeight;
+    const right = this.layout.left + this.layout.plotWidth;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(29, 37, 56, 0.35)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(this.layout.left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const lines = [
+      new Date(Number(candle.open_time_ms)).toLocaleString(),
+      "O " + formatPrice(candle.open),
+      "H " + formatPrice(candle.high),
+      "L " + formatPrice(candle.low),
+      "C " + formatPrice(candle.close),
+    ];
+
+    ctx.font = '12px "JetBrains Mono", monospace';
+    const pad = 8;
+    const lineH = 16;
+    let boxW = 0;
+    for (const line of lines) {
+      boxW = Math.max(boxW, ctx.measureText(line).width);
+    }
+    boxW += pad * 2;
+    const boxH = lineH * lines.length + pad * 2 - 2;
+
+    let boxX = x + 12;
+    let boxY = y + 12;
+    if (boxX + boxW > right - 4) {
+      boxX = x - boxW - 12;
+    }
+    if (boxY + boxH > bottom - 4) {
+      boxY = y - boxH - 12;
+    }
+    boxX = Math.max(this.layout.left + 4, boxX);
+    boxY = Math.max(top + 4, boxY);
+
+    ctx.fillStyle = "rgba(23, 31, 46, 0.9)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.24)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") {
+      ctx.roundRect(boxX, boxY, boxW, boxH, 8);
+    } else {
+      ctx.rect(boxX, boxY, boxW, boxH);
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(245, 248, 255, 0.95)";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    for (let i = 0; i < lines.length; i += 1) {
+      ctx.fillText(lines[i], boxX + pad, boxY + pad + i * lineH);
+    }
+    ctx.restore();
   }
 }
 
@@ -1203,6 +1679,7 @@ async function selectTimeframe(nextTimeframe) {
     return;
   }
   state.timeframe = nextTimeframe;
+  syncSelectionToQuery();
   renderTimeframeSelector();
   await loadAndRenderCandles({
     symbol: state.symbol,
@@ -1231,6 +1708,7 @@ async function selectPair(nextSymbol) {
       ? DEFAULT_TIMEFRAME
       : state.timeframes[0];
   }
+  syncSelectionToQuery();
   renderTimeframeSelector();
 
   await loadAndRenderCandles({
@@ -1361,7 +1839,37 @@ function handleVisibilityChange() {
   restartLiveUpdater();
 }
 
-async function resolveInitialSelection() {
+async function resolveInitialSelection(preferredSymbol = "", preferredTimeframe = "") {
+  const parsedSymbol = String(preferredSymbol || "").trim().toUpperCase();
+  const parsedTimeframe = String(preferredTimeframe || "").trim();
+  const initialSymbol = SYMBOL_RE.test(parsedSymbol) ? parsedSymbol : DEFAULT_SYMBOL;
+  const initialTimeframe = TIMEFRAME_RE.test(parsedTimeframe)
+    ? parsedTimeframe
+    : DEFAULT_TIMEFRAME;
+
+  try {
+    const options = await fetchTimeframeOptions(initialSymbol);
+    const timeframe = options.includes(initialTimeframe)
+      ? initialTimeframe
+      : options.includes(DEFAULT_TIMEFRAME)
+        ? DEFAULT_TIMEFRAME
+        : options[0];
+    if (timeframe) {
+      const candles = await fetchCandles(initialSymbol, timeframe);
+      if (candles.length > 0 || initialSymbol !== DEFAULT_SYMBOL) {
+        return {
+          symbol: initialSymbol,
+          timeframe,
+          timeframes: options,
+          candles,
+          symbols: [],
+        };
+      }
+    }
+  } catch (_error) {
+    // Query may point to an unknown symbol; fall back to existing discovery flow.
+  }
+
   const defaultCandles = await fetchCandles(DEFAULT_SYMBOL, DEFAULT_TIMEFRAME);
   if (defaultCandles.length > 0) {
     const options = await fetchTimeframeOptions(DEFAULT_SYMBOL);
@@ -1390,9 +1898,14 @@ async function resolveInitialSelection() {
     };
   }
 
-  const symbol = symbols.includes(DEFAULT_SYMBOL) ? DEFAULT_SYMBOL : symbols[0];
+  const symbol = symbols.includes(initialSymbol)
+    ? initialSymbol
+    : symbols.includes(DEFAULT_SYMBOL)
+      ? DEFAULT_SYMBOL
+      : symbols[0];
   const options = await fetchTimeframeOptions(symbol);
-  const picked = await pickTimeframeWithData(symbol, options, DEFAULT_TIMEFRAME);
+  const preferred = symbol === initialSymbol ? initialTimeframe : DEFAULT_TIMEFRAME;
+  const picked = await pickTimeframeWithData(symbol, options, preferred);
   return {
     symbol,
     timeframe: picked.timeframe,
@@ -1429,15 +1942,21 @@ async function initChartPage() {
   setPairTriggerLabel("");
   setLiveStatus("Initialisation", "idle");
   setIndicatorStatus("Initialisation", "idle");
+  startIndicatorBootstrapLoop();
 
   try {
-    const selection = await resolveInitialSelection();
+    const querySelection = parseQuerySelection();
+    const selection = await resolveInitialSelection(
+      querySelection.symbol,
+      querySelection.timeframe
+    );
     state.symbol = selection.symbol;
     state.timeframe = selection.timeframe;
     state.timeframes = selection.timeframes;
     state.symbols = selection.symbols;
     state.symbolsLoaded = selection.symbols.length > 0;
     state.candles = selection.candles;
+    syncSelectionToQuery();
     renderTimeframeSelector();
 
     if (!state.symbol || !state.timeframe) {
@@ -1450,6 +1969,11 @@ async function initChartPage() {
 
     refreshChartFromState({ showEmptyOverlay: true });
     void refreshIndicators({ reason: "manual" });
+    setTimeout(() => {
+      if (!state.indicatorSnapshot) {
+        void refreshIndicators({ reason: "manual" });
+      }
+    }, 1500);
     setTimeframeHint("Active: " + state.timeframe);
     setLiveUpdateNow();
     restartLiveUpdater();

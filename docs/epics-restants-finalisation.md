@@ -185,7 +185,7 @@ L'epic doit permettre au PO, au TechLead et à la QA de répondre à une questio
 5. **Epic 7** en continu des epics 1-5 pour valider quantitativement les choix (et en gate pre-release).
 
 ## Questions ouvertes (a trancher PO/TechLead)
-- Quel niveau de tolerance est accepte pour l'ecart numerique des indicateurs (epsilon par indicateur) ?
+- Quel niveau de tolérance est accepté pour l'écart numérique des indicateurs (epsilon par indicateur) ?
 - Quelle politique de versionning API appliquer en cas de changement de formule/metadonnee ?
 - Quelle volumetrie cible officielle du screener (200, 500, 1000 paires) pour verrouiller les NFR front ?
 - Quel format cible pour les regles de validation des signaux (YAML versionne, schema JSON, ou mix) ?

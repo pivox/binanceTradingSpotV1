@@ -13,6 +13,11 @@ import structlog
 import websockets
 
 from tradebot.observability.logging import configure_logging
+from tradebot.observability.metrics import (
+    WS_BOOT_SLOW_TOTAL,
+    WS_RECONNECT_TOTAL,
+    WS_STREAMS_SELECTED,
+)
 
 BINANCE_WS_URL = "wss://stream.binance.com:9443/ws"
 BINANCE_REST_URL = "https://api.binance.com"
@@ -345,6 +350,62 @@ async def subscribe_in_chunks(ws, symbols: List[str], chunk_size: int = 200) -> 
         await asyncio.sleep(0.25)
 
 
+def validate_stream_selection(symbols: List[str]) -> int:
+    hard_cap = env_positive_int("USDC_STREAMS_HARD_CAP", 1000)
+    streams_count = len(symbols)
+    if streams_count > hard_cap:
+        raise RuntimeError(
+            f"selected streams exceed USDC_STREAMS_HARD_CAP ({streams_count}>{hard_cap})"
+        )
+    return hard_cap
+
+
+def compute_reconnect_delay_s(attempt: int, base_delay_s: int, max_delay_s: int) -> int:
+    if attempt <= 1:
+        return max(1, min(base_delay_s, max_delay_s))
+    return min(max_delay_s, base_delay_s * (2 ** (attempt - 1)))
+
+
+def log_boot_observability(
+    logger,
+    *,
+    streams: int,
+    symbols_ms: int,
+    subscribe_ms: int,
+    boot_ms: int,
+    boot_warn_ms: int,
+) -> None:
+    WS_STREAMS_SELECTED.set(streams)
+    logger.info(
+        "ws_boot_complete",
+        streams=streams,
+        symbols_ms=symbols_ms,
+        subscribe_ms=subscribe_ms,
+        boot_ms=boot_ms,
+    )
+    if boot_ms > boot_warn_ms:
+        WS_BOOT_SLOW_TOTAL.inc()
+        logger.warning(
+            "ws_boot_slow",
+            boot_ms=boot_ms,
+            threshold_ms=boot_warn_ms,
+            streams=streams,
+        )
+
+
+def log_reconnect_observability(
+    logger, *, attempt: int, delay_s: int, error: str, streams: int
+) -> None:
+    WS_RECONNECT_TOTAL.inc()
+    logger.warning(
+        "ws_reconnect_scheduled",
+        attempt=attempt,
+        delay_s=delay_s,
+        previous_error=error,
+        streams=streams,
+    )
+
+
 def parse_closed_1m(msg: dict) -> Optional[Candle]:
     if msg.get("e") != "kline":
         return None
@@ -384,11 +445,17 @@ async def ws_loop() -> None:
     logger = structlog.get_logger()
     first_boot = True
     boot_warn_ms = env_positive_int("BOOT_WARN_MS", 5000)
+    reconnect_base_delay_s = env_positive_int("WS_RECONNECT_BASE_DELAY_S", 2)
+    reconnect_max_delay_s = env_positive_int("WS_RECONNECT_MAX_DELAY_S", 30)
+    reconnect_attempt = 0
+    last_streams = 0
 
     while True:
         try:
             boot_start = time.monotonic()
             symbols = await load_symbols()
+            validate_stream_selection(symbols)
+            last_streams = len(symbols)
             symbols_ms = int((time.monotonic() - boot_start) * 1000)
             aggs: Dict[str, MultiTfAggregator] = {
                 s: MultiTfAggregator() for s in symbols
@@ -404,20 +471,15 @@ async def ws_loop() -> None:
                 await subscribe_in_chunks(ws, symbols, chunk_size=200)
                 subscribe_ms = int((time.monotonic() - subscribe_start) * 1000)
                 boot_ms = int((time.monotonic() - boot_start) * 1000)
-                logger.info(
-                    "ws_boot_complete",
+                log_boot_observability(
+                    logger,
                     streams=len(symbols),
                     symbols_ms=symbols_ms,
                     subscribe_ms=subscribe_ms,
                     boot_ms=boot_ms,
+                    boot_warn_ms=boot_warn_ms,
                 )
-                if boot_ms > boot_warn_ms:
-                    logger.warning(
-                        "ws_boot_slow",
-                        boot_ms=boot_ms,
-                        threshold_ms=boot_warn_ms,
-                        streams=len(symbols),
-                    )
+                reconnect_attempt = 0
 
                 async for raw in ws:
                     msg = json.loads(raw)
@@ -452,10 +514,22 @@ async def ws_loop() -> None:
                         )
 
         except Exception as e:
-            logger.error("ws_disconnected", error=repr(e))
+            error = repr(e)
+            logger.error("ws_disconnected", error=error)
             if first_boot:
                 raise
-            await asyncio.sleep(2)
+            reconnect_attempt += 1
+            delay_s = compute_reconnect_delay_s(
+                reconnect_attempt, reconnect_base_delay_s, reconnect_max_delay_s
+            )
+            log_reconnect_observability(
+                logger,
+                attempt=reconnect_attempt,
+                delay_s=delay_s,
+                error=error,
+                streams=last_streams,
+            )
+            await asyncio.sleep(delay_s)
 
 
 def main() -> None:

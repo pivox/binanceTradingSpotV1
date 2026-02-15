@@ -451,7 +451,34 @@ def create_app(settings: Settings) -> web.Application:
 
         request.app[EXECUTION_MODE_KEY] = mode
         ctrl.env_overrides["EXECUTION_MODE"] = mode
-        daemon_status = ctrl.status()
+        try:
+            daemon_status = ctrl.status()
+        except DaemonControlError as exc:
+            log.error(
+                "daemon_mode_switch",
+                user=user,
+                remote=request.remote,
+                result="daemon_control_error",
+                endpoint="/daemon/mode",
+                error=str(exc),
+            )
+            return _json_err("daemon_control_error", str(exc), status=500)
+
+        log.info(
+            "daemon_mode_switch",
+            user=user,
+            remote=request.remote,
+            result="success",
+            mode=mode,
+            daemon_status=daemon_status.status,
+        )
+        return _json_ok(
+            {
+                "mode": mode,
+                "daemon_status": daemon_status.status,
+                "applies_on_next_start": daemon_status.status != "stopped",
+            }
+        )
         log.info(
             "daemon_mode_switch",
             user=user,

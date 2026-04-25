@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 
 
@@ -13,11 +14,12 @@ class Timeframe(str, Enum):
 @dataclass(frozen=True)
 class Candle:
     symbol: str
-    tf: str
+    timeframe: str
     open_time_ms: int
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-    is_closed: bool = True
+    close_time_ms: int
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: Decimal
+    is_partial: bool = False

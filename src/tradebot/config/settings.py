@@ -42,3 +42,7 @@ class Settings(BaseSettings):
     rbac_user_header: str = "X-User"
     rbac_trusted_proxy_ips: str = "127.0.0.1,::1"
     rbac_proxy_shared_secret: str = ""
+    binance_rest_url: str = "https://api.binance.com"
+    binance_ws_url: str = "wss://stream.binance.com:9443/ws"
+    usdc_pairs_limit: int = 200
+    usdc_streams_hard_cap: int = 1000

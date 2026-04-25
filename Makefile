@@ -14,6 +14,7 @@ stop:
 	docker compose down
 	@pkill -f ws_candle_daemon    2>/dev/null || true
 	@pkill -f temporal_worker_main 2>/dev/null || true
+	@pkill -f user_stream_main     2>/dev/null || true
 	@pkill -f daemon_api_main      2>/dev/null || true
 	@echo "Stopped."
 
@@ -36,6 +37,9 @@ worker:
 
 api:
 	poetry run python -m tradebot.apps.daemon_api_main
+
+user-stream:
+	poetry run python -m tradebot.apps.user_stream_main
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 logs:

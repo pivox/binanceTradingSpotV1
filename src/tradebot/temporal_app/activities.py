@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import timezone
+from decimal import Decimal
 from temporalio import activity
 from typing import Any, Optional
 
 import aiohttp
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from .types import (
     CandleCloseEvent,
@@ -18,14 +22,41 @@ from .types import (
     Position,
     Timeframe,
 )
+from tradebot.config.loader import load_app_config
 from tradebot.config.settings import Settings
+from tradebot.config.utils import get_app_config_path
+from tradebot.domain.models.candle import Candle as DomainCandle
+from tradebot.domain.models.cascade_result import CascadeResult as DomainCascadeResult, MarketRegime
+from tradebot.domain.models.exit_plan import ExitPlan, Lot, LotRule
+from tradebot.domain.models.mtf_state import MtfState as DomainMtfState
+from tradebot.domain.models.order_intent import (
+    OrderIntent as DomainOrderIntent,
+    OrderIntentStatus,
+    OrderType as DomainOrderType,
+    Side as DomainSide,
+)
+from tradebot.domain.models.position import Position as DomainPosition, PositionStatus
+from tradebot.domain.models.signal import SignalQuality, SetupType
+from tradebot.domain.models.symbol_filters import SymbolFilters
+from tradebot.infra.binance.filters import BinanceFilters
+from tradebot.infra.binance.rest import BinanceRestClient
 from tradebot.infra.db.engine import create_session_factory
 from tradebot.infra.db.models import (
     BackfillJob,
     Candle,
+    CandleCloseEvent as CandleCloseEventModel,
+    CandleCloseEventProcessed,
     CandleGapRequest,
     ExchangeInfoCache,
+    IndicatorSnapshot as IndicatorSnapshotModel,
 )
+from tradebot.infra.db.repositories.mtf_state_repo_sql import MtfStateRepoSql
+from tradebot.infra.db.repositories.order_intent_repo_sql import OrderIntentRepoSql
+from tradebot.infra.db.repositories.position_repo_sql import PositionRepoSql
+from tradebot.services.indicators.factory import build_indicator_snapshot, CandleSample
+from tradebot.services.mtf.cascade import evaluate_cascade
+from tradebot.services.strategy.exit_engine import compute_exit_intents
+from tradebot.services.strategy.signal_engine import compute_signal
 from tradebot.infra.db.repositories.backfill_repo_sql import (
     BackfillRepoSql,
     BackfillRetryPolicy,
@@ -472,25 +503,57 @@ def stable_shard_of(symbol: str, shard_count: int) -> int:
 async def fetch_candle_close_events(
     shard_id: int, shard_count: int, limit: int
 ) -> list[CandleCloseEvent]:
-    """
-    Fetch candle_close_event rows for the shard.
-    Recommended: watermark cursor + ORDER BY open_time_ms / id.
-    """
-    # TODO: SELECT ... WHERE shard_id=? AND id > cursor LIMIT ?
-    _activity_log(
-        "info",
-        "fetch_candle_close_events",
-        shard_id=shard_id,
-        shard_count=shard_count,
-        limit=limit,
-    )
-    return []
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    with session_factory() as session:
+        rows = session.execute(
+            select(CandleCloseEventModel)
+            .outerjoin(
+                CandleCloseEventProcessed,
+                CandleCloseEventModel.id == CandleCloseEventProcessed.id,
+            )
+            .where(
+                CandleCloseEventModel.shard_id == shard_id,
+                CandleCloseEventProcessed.id.is_(None),
+            )
+            .order_by(CandleCloseEventModel.id.asc())
+            .limit(limit)
+        ).scalars().all()
+    _activity_log("info", "fetch_candle_close_events", shard_id=shard_id, count=len(rows))
+    return [
+        CandleCloseEvent(
+            symbol=str(row.symbol),
+            timeframe=str(row.timeframe),
+            open_time_ms=int(row.open_time_ms),
+        )
+        for row in rows
+    ]
 
 
 @activity.defn(name="mark_candle_close_events_processed")
 async def mark_candle_close_events_processed(events: list[CandleCloseEvent]) -> None:
-    """Mark consumed events (idempotent)."""
-    # TODO: DELETE FROM candle_close_event WHERE (symbol,tf,open_time) IN (...)
+    if not events:
+        return
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    now_ms = _now_ms()
+    with session_factory() as session:
+        for evt in events:
+            row = session.execute(
+                select(CandleCloseEventModel).where(
+                    CandleCloseEventModel.symbol == evt.symbol,
+                    CandleCloseEventModel.timeframe == evt.timeframe,
+                    CandleCloseEventModel.open_time_ms == evt.open_time_ms,
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                continue
+            session.execute(
+                pg_insert(CandleCloseEventProcessed)
+                .values(id=int(row.id), processed_at_ms=now_ms)
+                .on_conflict_do_nothing(index_elements=["id"])
+            )
+        session.commit()
     _activity_log("info", "mark_events_processed", count=len(events))
 
 
@@ -501,23 +564,94 @@ async def mark_candle_close_events_processed(events: list[CandleCloseEvent]) -> 
 
 @activity.defn(name="validate_candle_event")
 async def validate_candle_event(evt: CandleCloseEvent) -> dict[str, Any]:
-    """
-    Sanity checks + gap detection.
-    Return dict (ok/gap/etc.). If gap -> trigger backfill elsewhere.
-    """
-    # TODO: verify previous candle, OHLCV, etc.
-    return {"ok": True, "gap": False}
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    with session_factory() as session:
+        count = session.execute(
+            select(func.count()).select_from(Candle).where(
+                Candle.symbol == evt.symbol,
+                Candle.timeframe == evt.timeframe,
+                Candle.open_time_ms == evt.open_time_ms,
+            )
+        ).scalar() or 0
+    return {"ok": count > 0, "gap": False}
 
 
 @activity.defn(name="compute_indicator_snapshot")
 async def compute_indicator_snapshot(
     symbol: str, timeframe: Timeframe, open_time_ms: int
 ) -> IndicatorSnapshot:
-    """
-    Compute indicators on historical window and persist (or return) snapshot.
-    """
-    # TODO: load N candles from DB + compute RSI/EMA/MACD/ATR...
-    payload = {"rsi": 50.0, "ema21": 0.0, "macd": 0.0, "atr": 0.0}
+    _WINDOW = 250  # enough warmup for ema200 + stochrsi
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+
+    with session_factory() as session:
+        rows = session.execute(
+            select(Candle)
+            .where(
+                Candle.symbol == symbol,
+                Candle.timeframe == timeframe,
+                Candle.open_time_ms <= open_time_ms,
+                Candle.is_partial.is_(False),
+            )
+            .order_by(Candle.open_time_ms.desc())
+            .limit(_WINDOW)
+        ).scalars().all()
+
+    if not rows:
+        raise RuntimeError(f"no candles for {symbol}/{timeframe}@{open_time_ms}")
+
+    candles = sorted(
+        [
+            CandleSample(
+                open_time_ms=int(row.open_time_ms),
+                close_time_ms=int(row.close_time_ms),
+                open=float(row.open),
+                high=float(row.high),
+                low=float(row.low),
+                close=float(row.close),
+                volume=float(row.volume),
+            )
+            for row in rows
+        ],
+        key=lambda c: c.open_time_ms,
+    )
+
+    computed_at = _now_ms()
+    payload = build_indicator_snapshot(
+        symbol=symbol,
+        timeframe=timeframe,
+        candles=candles,
+        computed_at=computed_at,
+    )
+    # close_price is needed by condition helpers
+    payload["close_price"] = candles[-1].close
+
+    close_time_ms = candles[-1].close_time_ms
+    etag = hashlib.md5(
+        f"{symbol}:{timeframe}:{close_time_ms}:{computed_at}".encode()
+    ).hexdigest()[:16]
+
+    with session_factory() as session:
+        session.execute(
+            pg_insert(IndicatorSnapshotModel)
+            .values(
+                symbol=symbol,
+                timeframe=timeframe,
+                close_time_ms=close_time_ms,
+                computed_at_ms=computed_at,
+                schema_version=settings.indicator_default_schema_version,
+                payload_json=payload,
+                etag=etag,
+            )
+            .on_conflict_do_update(
+                constraint="uq_indicator_snapshots_symbol_tf_close_time",
+                set_={"computed_at_ms": computed_at, "payload_json": payload, "etag": etag},
+            )
+        )
+        session.commit()
+
+    _activity_log("info", "indicator_snapshot_computed", symbol=symbol, timeframe=timeframe)
     return IndicatorSnapshot(
         symbol=symbol, timeframe=timeframe, open_time_ms=open_time_ms, payload=payload
     )
@@ -527,22 +661,57 @@ async def compute_indicator_snapshot(
 async def load_latest_snapshots(
     symbol: str,
 ) -> dict[Timeframe, Optional[IndicatorSnapshot]]:
-    """
-    Fetch latest snapshots for 4h/1h/15m/5m/1m.
-    """
-    # TODO: SELECT latest per tf
-    return {"4h": None, "1h": None, "15m": None, "5m": None, "1m": None}
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    result: dict[str, Optional[IndicatorSnapshot]] = {}
+    with session_factory() as session:
+        for tf in ("4h", "1h", "15m", "5m", "1m"):
+            row = session.execute(
+                select(IndicatorSnapshotModel)
+                .where(
+                    IndicatorSnapshotModel.symbol == symbol,
+                    IndicatorSnapshotModel.timeframe == tf,
+                )
+                .order_by(IndicatorSnapshotModel.close_time_ms.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                result[tf] = None
+            else:
+                payload = dict(row.payload_json) if row.payload_json else {}
+                result[tf] = IndicatorSnapshot(
+                    symbol=symbol,
+                    timeframe=tf,
+                    open_time_ms=int(row.close_time_ms),
+                    payload=payload,
+                )
+    return result
 
 
 @activity.defn(name="load_mtf_state")
 async def load_mtf_state(symbol: str) -> MtfState:
-    # TODO: SELECT mtf_state WHERE symbol=...
-    return MtfState(symbol=symbol)
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    with session_factory() as session:
+        repo = MtfStateRepoSql(session)
+        domain_state = repo.get(symbol)
+    if domain_state is None:
+        return MtfState(symbol=symbol)
+    return MtfState(
+        symbol=symbol,
+        context_ok_4h=domain_state.cascade_passed,
+        context_ok_1h=domain_state.cascade_passed,
+        ok_15m=domain_state.cascade_passed,
+        ok_5m=domain_state.cascade_passed,
+        last_eval_1m_open_time_ms=domain_state.signal_open_time_ms or 0,
+        next_allowed_eval_at_ms=domain_state.evaluated_at_ms,
+    )
 
 
 @activity.defn(name="save_mtf_state")
 async def save_mtf_state(state: MtfState) -> None:
-    # TODO: UPSERT mtf_state
+    # The rich domain MtfState is persisted inside cascade_validate_mtf;
+    # this activity is a no-op kept for workflow API compatibility.
     _activity_log("info", "save_mtf_state", symbol=state.symbol)
 
 
@@ -557,40 +726,267 @@ async def cascade_validate_mtf(
     snapshots: dict[Timeframe, Optional[IndicatorSnapshot]],
     state: MtfState,
 ) -> dict[str, Any]:
-    """
-    Apply cascade 4h->1h->15m->5m->1m.
-    Return {"ok": bool, "failed_tf": "5m"|..., "reason": "..."}.
-    """
-    # TODO: implement your exact rules
-    # Simplified example:
-    if snapshots.get("4h") is None or snapshots.get("1h") is None:
-        return {"ok": False, "failed_tf": "4h", "reason": "missing_context"}
+    # Convert temporal snapshots to raw payload dicts for evaluate_cascade
+    snap_dict: dict[str, dict] = {}
+    for tf, snap in snapshots.items():
+        if snap is not None:
+            snap_dict[tf] = snap.payload
+
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+
+    # Load the previous 1h snapshot for golden-cross detection
+    prev_1h_payload: Optional[dict] = None
+    with session_factory() as session:
+        prev_row = session.execute(
+            select(IndicatorSnapshotModel)
+            .where(
+                IndicatorSnapshotModel.symbol == symbol,
+                IndicatorSnapshotModel.timeframe == "1h",
+            )
+            .order_by(IndicatorSnapshotModel.close_time_ms.desc())
+            .offset(1)
+            .limit(1)
+        ).scalar_one_or_none()
+        if prev_row is not None:
+            prev_1h_payload = dict(prev_row.payload_json)
+
+    cascade_result = evaluate_cascade(symbol, snap_dict, prev_1h_payload)
+
+    # Persist result so downstream activities can use it
+    with session_factory() as session:
+        repo = MtfStateRepoSql(session)
+        domain_state = DomainMtfState(
+            symbol=symbol,
+            regime=cascade_result.regime.value,
+            cascade_passed=cascade_result.cascade_passed,
+            score=cascade_result.score,
+            quality=cascade_result.quality.value,
+            active_setup=cascade_result.active_setup.value if cascade_result.active_setup else None,
+            scores_by_tf=cascade_result.scores_by_tf,
+            rejection_reason=cascade_result.rejection_reason,
+            evaluated_at_ms=cascade_result.evaluated_at_ms,
+        )
+        repo.upsert(domain_state)
+        session.commit()
+
+    if not cascade_result.cascade_passed:
+        return {
+            "ok": False,
+            "failed_tf": cascade_result.rejection_reason or "cascade",
+            "reason": cascade_result.rejection_reason or "score_below_threshold",
+        }
     return {"ok": True, "failed_tf": None, "reason": "ok"}
 
 
 @activity.defn(name="create_buy_intent")
 async def create_buy_intent(symbol: str, open_time_ms: int) -> OrderIntent:
-    """
-    Create/UPSERT OrderIntent BUY idempotent via intent_key.
-    """
     intent_key = f"buy:{symbol}:{open_time_ms}"
-    payload = {"order_type": "LIMIT", "quote_budget": 100.0}
-    # TODO: UPSERT order_intent(intent_key UNIQUE)
-    _activity_log(
-        "info",
-        "signal_intent_created",
-        intent_key=intent_key,
-        side="BUY",
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    now_ms = _now_ms()
+
+    # Idempotency guard
+    with session_factory() as session:
+        existing = OrderIntentRepoSql(session).get_by_intent_key(intent_key)
+    if existing is not None:
+        return OrderIntent(
+            intent_key=existing.intent_key,
+            symbol=existing.symbol,
+            side=existing.side.value,
+            timeframe="1m",
+            open_time_ms=open_time_ms,
+            payload={"order_id": existing.id, "position_id": existing.position_id},
+            status=existing.status.value,
+        )
+
+    # Load cascade result + exchange filters + candles in a single session
+    with session_factory() as session:
+        mtf_repo = MtfStateRepoSql(session)
+        domain_mtf = mtf_repo.get(symbol)
+        if domain_mtf is None or not domain_mtf.cascade_passed:
+            raise RuntimeError(f"cascade not passed for {symbol}")
+
+        cache_row = session.get(ExchangeInfoCache, symbol)
+        if cache_row is None:
+            raise RuntimeError(f"no exchange info for {symbol}")
+        filters = SymbolFilters(
+            step_size=Decimal(str(cache_row.qty_step_size or "0.01")),
+            min_qty=Decimal(str(cache_row.qty_min or "0.001")),
+            max_qty=Decimal(str(cache_row.qty_max or "999999")),
+            tick_size=Decimal(str(cache_row.price_tick_size or "0.01")),
+            min_price=Decimal(str(cache_row.price_min or "0")),
+            max_price=Decimal(str(cache_row.price_max or "999999")),
+            min_notional=Decimal(str(cache_row.min_notional or "10")),
+        )
+
+        candle_rows = session.execute(
+            select(Candle)
+            .where(
+                Candle.symbol == symbol,
+                Candle.timeframe == "1m",
+                Candle.open_time_ms <= open_time_ms,
+            )
+            .order_by(Candle.open_time_ms.desc())
+            .limit(2)
+        ).scalars().all()
+        if not candle_rows:
+            raise RuntimeError(f"no 1m candle for {symbol}@{open_time_ms}")
+
+        def _to_domain_candle(r: Any) -> DomainCandle:
+            return DomainCandle(
+                symbol=symbol,
+                timeframe="1m",
+                open_time_ms=int(r.open_time_ms),
+                close_time_ms=int(r.close_time_ms),
+                open=Decimal(str(r.open)),
+                high=Decimal(str(r.high)),
+                low=Decimal(str(r.low)),
+                close=Decimal(str(r.close)),
+                volume=Decimal(str(r.volume)),
+            )
+
+        candle_1m = _to_domain_candle(candle_rows[0])
+        prev_candle_1m = _to_domain_candle(candle_rows[1]) if len(candle_rows) >= 2 else None
+
+        snap_1m_row = session.execute(
+            select(IndicatorSnapshotModel)
+            .where(
+                IndicatorSnapshotModel.symbol == symbol,
+                IndicatorSnapshotModel.timeframe == "1m",
+                IndicatorSnapshotModel.close_time_ms <= int(candle_rows[0].close_time_ms),
+            )
+            .order_by(IndicatorSnapshotModel.close_time_ms.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        snap_5m_row = session.execute(
+            select(IndicatorSnapshotModel)
+            .where(
+                IndicatorSnapshotModel.symbol == symbol,
+                IndicatorSnapshotModel.timeframe == "5m",
+            )
+            .order_by(IndicatorSnapshotModel.close_time_ms.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        snapshot_1m: dict = dict(snap_1m_row.payload_json) if snap_1m_row else {}
+        snapshot_5m: dict = dict(snap_5m_row.payload_json) if snap_5m_row else {}
+
+        open_count = PositionRepoSql(session).count_open()
+
+    app_config = load_app_config(get_app_config_path())
+    strategy = app_config.strategy
+    if open_count >= strategy.max_open_positions:
+        raise RuntimeError(f"max_open_positions={strategy.max_open_positions} reached")
+
+    cascade_obj = DomainCascadeResult(
         symbol=symbol,
-        ts_ms=int(time.time() * 1000),
+        regime=MarketRegime(domain_mtf.regime),
+        cascade_passed=domain_mtf.cascade_passed,
+        score=domain_mtf.score,
+        quality=SignalQuality(domain_mtf.quality),
+        active_setup=SetupType(domain_mtf.active_setup) if domain_mtf.active_setup else None,
+        scores_by_tf=domain_mtf.scores_by_tf,
+        rejection_reason=domain_mtf.rejection_reason,
+        evaluated_at_ms=domain_mtf.evaluated_at_ms,
     )
+
+    signal = compute_signal(
+        cascade_obj,
+        candle_1m,
+        snapshot_1m,
+        snapshot_5m,
+        filters,
+        prev_candle_1m=prev_candle_1m,
+        config=strategy,
+    )
+    if signal is None:
+        raise RuntimeError(f"signal not generated for {symbol}@{open_time_ms}")
+
+    # Size lots
+    lot_cfgs = strategy.exit_plan.lots  # [A, B, C]
+    quote_budget = Decimal(str(strategy.per_trade_quote_budget))
+    qty_total = BinanceFilters.round_quantity(quote_budget / signal.entry_price, filters)
+    qty_a = BinanceFilters.round_quantity(qty_total * Decimal(str(lot_cfgs[0].pct)), filters)
+    qty_b = BinanceFilters.round_quantity(qty_total * Decimal(str(lot_cfgs[1].pct)), filters)
+    qty_c = BinanceFilters.round_quantity(qty_total - qty_a - qty_b, filters)
+
+    exit_plan = ExitPlan(
+        lot_a=Lot(
+            id="A", pct=lot_cfgs[0].pct,
+            rule=LotRule(type=lot_cfgs[0].rule.type, r_multiple=lot_cfgs[0].rule.params.get("r", 2.0)),
+            quantity=qty_a,
+        ),
+        lot_b=Lot(
+            id="B", pct=lot_cfgs[1].pct,
+            rule=LotRule(type=lot_cfgs[1].rule.type, r_multiple=lot_cfgs[1].rule.params.get("r", 3.0)),
+            quantity=qty_b,
+        ),
+        lot_c=Lot(
+            id="C", pct=lot_cfgs[2].pct,
+            rule=LotRule(
+                type=lot_cfgs[2].rule.type,
+                atr_tf=lot_cfgs[2].rule.params.get("atr_tf", "5m"),
+                atr_multiplier=lot_cfgs[2].rule.params.get("k", 2.0),
+            ),
+            quantity=qty_c,
+        ),
+        r_distance=signal.r_distance,
+    )
+
+    position_id = str(uuid.uuid4())
+    intent_id = str(uuid.uuid4())
+    shard_id = stable_shard_of(symbol, settings.shard_count)
+
+    domain_position = DomainPosition(
+        id=position_id,
+        symbol=symbol,
+        side="BUY",
+        status=PositionStatus.PENDING_ENTRY,
+        entry_price=signal.entry_price,
+        quantity_total=qty_total,
+        stop_loss=signal.stop_loss,
+        atr_at_entry=signal.atr_1m,
+        signal_score=float(signal.score),
+        setup_type=domain_mtf.active_setup or "A",
+        shard_id=shard_id,
+        opened_at_ms=now_ms,
+        exit_plan=exit_plan,
+        high_since_entry=signal.entry_price,
+    )
+    domain_intent = DomainOrderIntent(
+        id=intent_id,
+        intent_key=intent_key,
+        symbol=symbol,
+        side=DomainSide.BUY,
+        order_type=DomainOrderType.LIMIT,
+        quantity=qty_total,
+        price=signal.entry_price,
+        position_id=position_id,
+        created_at_ms=now_ms,
+        updated_at_ms=now_ms,
+    )
+
+    with session_factory() as session:
+        pos_repo = PositionRepoSql(session)
+        intent_repo = OrderIntentRepoSql(session)
+        pos_repo.create(domain_position)
+        intent_repo.create(domain_intent)
+        session.commit()
+
+    _activity_log("info", "buy_intent_created", intent_key=intent_key, symbol=symbol)
     return OrderIntent(
         intent_key=intent_key,
         symbol=symbol,
         side="BUY",
         timeframe="1m",
         open_time_ms=open_time_ms,
-        payload=payload,
+        payload={
+            "order_id": intent_id,
+            "position_id": position_id,
+            "entry_price": str(signal.entry_price),
+            "stop_loss": str(signal.stop_loss),
+            "qty": str(qty_total),
+        },
     )
 
 
@@ -599,23 +995,60 @@ async def create_sell_intent(
     position_id: str, symbol: str, lot_id: str, qty_pct: float
 ) -> OrderIntent:
     intent_key = f"sell:{position_id}:{lot_id}"
-    payload = {"order_type": "LIMIT", "qty_pct": qty_pct, "lot_id": lot_id}
-    # TODO: UPSERT order_intent
-    _activity_log(
-        "info",
-        "signal_intent_created",
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    now_ms = _now_ms()
+
+    # Idempotency guard
+    with session_factory() as session:
+        existing = OrderIntentRepoSql(session).get_by_intent_key(intent_key)
+    if existing is not None:
+        return OrderIntent(
+            intent_key=existing.intent_key,
+            symbol=existing.symbol,
+            side=existing.side.value,
+            timeframe="1m",
+            open_time_ms=0,
+            payload={"order_id": existing.id, "lot_id": lot_id},
+            status=existing.status.value,
+        )
+
+    with session_factory() as session:
+        domain_pos = PositionRepoSql(session).get_by_id(position_id)
+    if domain_pos is None:
+        raise RuntimeError(f"position not found: {position_id}")
+
+    # Determine the exact lot quantity
+    lot_map = {lot.id: lot for lot in domain_pos.exit_plan.lots}
+    lot = lot_map.get(lot_id)
+    qty = lot.quantity if lot is not None else Decimal(str(qty_pct)) * domain_pos.quantity_total
+
+    intent_id = str(uuid.uuid4())
+    domain_intent = DomainOrderIntent(
+        id=intent_id,
         intent_key=intent_key,
-        side="SELL",
         symbol=symbol,
-        ts_ms=int(time.time() * 1000),
+        side=DomainSide.SELL,
+        order_type=DomainOrderType.MARKET,
+        quantity=qty,
+        lot_id=lot_id,
+        position_id=position_id,
+        created_at_ms=now_ms,
+        updated_at_ms=now_ms,
     )
+
+    with session_factory() as session:
+        OrderIntentRepoSql(session).create(domain_intent)
+        session.commit()
+
+    _activity_log("info", "sell_intent_created", intent_key=intent_key, symbol=symbol, lot=lot_id)
     return OrderIntent(
         intent_key=intent_key,
         symbol=symbol,
         side="SELL",
         timeframe="1m",
         open_time_ms=0,
-        payload=payload,
+        payload={"order_id": intent_id, "lot_id": lot_id, "qty": str(qty)},
     )
 
 
@@ -626,42 +1059,91 @@ async def create_sell_intent(
 
 @activity.defn(name="place_order")
 async def place_order(intent: OrderIntent) -> dict[str, Any]:
-    """
-    Execute the intent on Binance (I/O).
-    """
     mode, approved = _get_execution_mode()
-    # TODO: call Binance REST, apply quantization, handle rate limits/retries.
-    _activity_log(
-        "info",
-        "place_order",
-        side=intent.side,
-        symbol=intent.symbol,
-        mode=mode,
-        approved=approved,
-        ts_ms=int(time.time() * 1000),
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    now_ms = _now_ms()
+
+    # Load the canonical domain intent from DB
+    with session_factory() as session:
+        domain_intent = OrderIntentRepoSql(session).get_by_intent_key(intent.intent_key)
+
+    if domain_intent is None:
+        raise RuntimeError(f"intent not found: {intent.intent_key}")
+
+    if domain_intent.status not in (OrderIntentStatus.PENDING, OrderIntentStatus.SENT):
+        return {"ok": True, "mode": mode, "status": domain_intent.status.value, "skipped": True}
+
+    if mode != "live":
+        # Backtesting / dry-run: simulate fill immediately
+        with session_factory() as session:
+            OrderIntentRepoSql(session).update_status(
+                domain_intent.id,
+                OrderIntentStatus.FILLED,
+                filled_qty=domain_intent.quantity,
+                avg_price=domain_intent.price or Decimal("0"),
+            )
+            session.commit()
+        _activity_log("info", "place_order_simulated", intent_key=intent.intent_key, mode=mode)
+        return {"ok": True, "mode": mode, "simulated": True, "client_order_id": intent.intent_key}
+
+    # Live: call Binance REST
+    client = BinanceRestClient(
+        api_key=settings.binance_api_key,
+        api_secret=settings.binance_api_secret,
+        base_url=settings.binance_rest_url,
     )
-    return {
-        "ok": True,
-        "order_id": "123456",
-        "client_order_id": intent.intent_key,
-        "mode": mode,
-    }
+    try:
+        resp = await client.place_order(
+            symbol=domain_intent.symbol,
+            side=domain_intent.side.value,
+            order_type=domain_intent.order_type.value,
+            quantity=domain_intent.quantity,
+            price=domain_intent.price,
+            stop_price=domain_intent.stop_price,
+            client_order_id=intent.intent_key,
+        )
+        data = resp.data if isinstance(resp.data, dict) else {}
+        binance_order_id = int(data.get("orderId", 0)) or None
+        with session_factory() as session:
+            OrderIntentRepoSql(session).update_status(
+                domain_intent.id,
+                OrderIntentStatus.SENT,
+                binance_order_id=binance_order_id,
+            )
+            session.commit()
+        _activity_log("info", "place_order_sent", intent_key=intent.intent_key, binance_id=binance_order_id)
+        return {"ok": True, "mode": mode, "binance_order_id": binance_order_id, "client_order_id": intent.intent_key}
+    finally:
+        await client.close()
 
 
 @activity.defn(name="cancel_order")
 async def cancel_order(symbol: str, order_id: str) -> dict[str, Any]:
     mode, approved = _get_execution_mode()
-    # TODO: Binance cancel
-    _activity_log(
-        "info",
-        "cancel_order",
-        symbol=symbol,
-        order_id=order_id,
-        mode=mode,
-        approved=approved,
-        ts_ms=int(time.time() * 1000),
+    if mode != "live":
+        _activity_log("info", "cancel_order_skipped", symbol=symbol, order_id=order_id, mode=mode)
+        return {"ok": True, "mode": mode, "skipped": True}
+
+    settings = Settings()
+    client = BinanceRestClient(
+        api_key=settings.binance_api_key,
+        api_secret=settings.binance_api_secret,
+        base_url=settings.binance_rest_url,
     )
-    return {"ok": True, "mode": mode}
+    try:
+        binance_id = int(order_id) if order_id.isdigit() else None
+        client_oid = order_id if not order_id.isdigit() else None
+        await client.cancel_order(symbol=symbol, order_id=binance_id, client_order_id=client_oid)
+        _activity_log("info", "cancel_order_sent", symbol=symbol, order_id=order_id)
+        return {"ok": True, "mode": mode}
+    except Exception as exc:
+        # -2011 = unknown order (already cancelled/filled) — treat as ok
+        if "-2011" in str(exc):
+            return {"ok": True, "mode": mode, "already_done": True}
+        raise
+    finally:
+        await client.close()
 
 
 # =========================
@@ -671,29 +1153,127 @@ async def cancel_order(symbol: str, order_id: str) -> dict[str, Any]:
 
 @activity.defn(name="fetch_due_positions")
 async def fetch_due_positions(shard_id: int, limit: int) -> list[Position]:
-    """
-    Fetch positions due (next_check_at <= now).
-    """
-    # TODO: SELECT FROM position WHERE shard_id=? AND status IN (...) AND next_check_at<=now LIMIT ?
-    return []
+    _CHECK_INTERVAL_MS = 10_000  # positions older than 10s are due
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    due_before_ms = _now_ms() - _CHECK_INTERVAL_MS
+    with session_factory() as session:
+        domain_positions = PositionRepoSql(session).list_open_by_shard(shard_id, due_before_ms)
+    # Convert domain Position → temporal Position (limit applied in Python to keep it simple)
+    result: list[Position] = []
+    for p in domain_positions[:limit]:
+        from tradebot.infra.db.repositories._serializers import exit_plan_to_json
+        import json
+        result.append(
+            Position(
+                position_id=p.id,
+                symbol=p.symbol,
+                shard_id=p.shard_id,
+                status=p.status.value,
+                qty_base=float(p.quantity_total),
+                avg_entry_price=float(p.entry_price),
+                exit_plan=json.loads(exit_plan_to_json(p.exit_plan)),
+                next_check_at_ms=p.last_checked_ms or 0,
+            )
+        )
+    return result
 
 
 @activity.defn(name="apply_exit_engine")
 async def apply_exit_engine(pos: Position) -> dict[str, Any]:
-    """
-    Compute exit actions (sell% / hold%) based on exit_plan + state.
-    Return e.g. {"actions":[{"type":"SELL","lot":"A","pct":0.60}, ...], "next_check_in_ms": 10000}
-    """
-    # TODO: TP1/TP2/runner trailing/time-stop...
-    return {"actions": [], "next_check_in_ms": 10_000}
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+
+    with session_factory() as session:
+        domain_pos = PositionRepoSql(session).get_by_id(pos.position_id)
+        if domain_pos is None:
+            return {"actions": [], "next_check_in_ms": 10_000}
+
+        snap_1h_row = session.execute(
+            select(IndicatorSnapshotModel)
+            .where(
+                IndicatorSnapshotModel.symbol == pos.symbol,
+                IndicatorSnapshotModel.timeframe == "1h",
+            )
+            .order_by(IndicatorSnapshotModel.close_time_ms.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        snap_5m_row = session.execute(
+            select(IndicatorSnapshotModel)
+            .where(
+                IndicatorSnapshotModel.symbol == pos.symbol,
+                IndicatorSnapshotModel.timeframe == "5m",
+            )
+            .order_by(IndicatorSnapshotModel.close_time_ms.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+        candle_row = session.execute(
+            select(Candle)
+            .where(Candle.symbol == pos.symbol, Candle.timeframe == "5m")
+            .order_by(Candle.open_time_ms.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+    if candle_row is None:
+        return {"actions": [], "next_check_in_ms": 10_000}
+
+    snapshot_1h: dict = dict(snap_1h_row.payload_json) if snap_1h_row else {}
+    snapshot_5m: dict = dict(snap_5m_row.payload_json) if snap_5m_row else {}
+    candle_5m = DomainCandle(
+        symbol=pos.symbol,
+        timeframe="5m",
+        open_time_ms=int(candle_row.open_time_ms),
+        close_time_ms=int(candle_row.close_time_ms),
+        open=Decimal(str(candle_row.open)),
+        high=Decimal(str(candle_row.high)),
+        low=Decimal(str(candle_row.low)),
+        close=Decimal(str(candle_row.close)),
+        volume=Decimal(str(candle_row.volume)),
+    )
+
+    intents = compute_exit_intents(domain_pos, snapshot_1h, snapshot_5m, candle_5m)
+
+    actions: list[dict[str, Any]] = []
+    for intent in intents:
+        if intent.quantity > Decimal("0"):
+            actions.append({
+                "type": "SELL",
+                "lot": intent.lot_id,
+                "qty": str(intent.quantity),
+                "reason": intent.reason.value,
+                "order_type": intent.order_type,
+            })
+        elif intent.new_stop_loss is not None or intent.new_trailing_level is not None:
+            actions.append({
+                "type": "UPDATE_SL",
+                "lot": intent.lot_id,
+                "new_stop_loss": str(intent.new_stop_loss) if intent.new_stop_loss else None,
+                "new_trailing": str(intent.new_trailing_level) if intent.new_trailing_level else None,
+                "reason": intent.reason.value,
+            })
+
+    return {"actions": actions, "next_check_in_ms": 10_000}
 
 
 @activity.defn(name="update_position_after_actions")
 async def update_position_after_actions(
     position_id: str, patch: dict[str, Any]
 ) -> None:
-    # TODO: UPDATE position SET ...
-    _activity_log("info", "update_position", position_id=position_id, patch=patch)
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    now_ms = _now_ms()
+    with session_factory() as session:
+        repo = PositionRepoSql(session)
+        domain_pos = repo.get_by_id(position_id)
+        if domain_pos is None:
+            _activity_log("warning", "update_position_not_found", position_id=position_id)
+            return
+        from dataclasses import replace as dc_replace
+        updated = dc_replace(domain_pos, last_checked_ms=now_ms)
+        repo.update(updated)
+        session.commit()
+    _activity_log("info", "update_position", position_id=position_id)
 
 
 # =========================
@@ -869,11 +1449,58 @@ async def reconcile_klines() -> dict[str, Any]:
 
 @activity.defn(name="reconcile_orders")
 async def reconcile_orders() -> dict[str, Any]:
-    """
-    Resync orders/positions vs Binance REST.
-    """
-    # TODO: fetch open orders, compare DB, patch states
-    return {"ok": True, "fixed": 0}
+    mode, _ = _get_execution_mode()
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    fixed = 0
+    errors = 0
+
+    with session_factory() as session:
+        active_intents = OrderIntentRepoSql(session).list_active()
+
+    if not active_intents or mode != "live":
+        return {"ok": True, "fixed": fixed, "mode": mode}
+
+    client = BinanceRestClient(
+        api_key=settings.binance_api_key,
+        api_secret=settings.binance_api_secret,
+        base_url=settings.binance_rest_url,
+    )
+    try:
+        for intent in active_intents:
+            if intent.binance_order_id is None:
+                continue
+            try:
+                resp = await client.get_order(
+                    symbol=intent.symbol, order_id=intent.binance_order_id
+                )
+                data = resp.data if isinstance(resp.data, dict) else {}
+                binance_status = str(data.get("status", "")).upper()
+                if binance_status in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
+                    new_status = (
+                        OrderIntentStatus.FILLED
+                        if binance_status == "FILLED"
+                        else OrderIntentStatus.CANCELLED
+                    )
+                    filled_qty_raw = data.get("executedQty")
+                    avg_price_raw = data.get("avgPrice") or data.get("price")
+                    with session_factory() as session:
+                        OrderIntentRepoSql(session).update_status(
+                            intent.id,
+                            new_status,
+                            filled_qty=Decimal(str(filled_qty_raw)) if filled_qty_raw else None,
+                            avg_price=Decimal(str(avg_price_raw)) if avg_price_raw else None,
+                        )
+                        session.commit()
+                    fixed += 1
+            except Exception as exc:
+                _activity_log("warning", "reconcile_orders_error", intent_id=intent.id, error=str(exc))
+                errors += 1
+    finally:
+        await client.close()
+
+    _activity_log("info", "reconcile_orders_done", fixed=fixed, errors=errors)
+    return {"ok": errors == 0, "fixed": fixed, "errors": errors, "mode": mode}
 
 
 @activity.defn(name="refresh_exchange_info")

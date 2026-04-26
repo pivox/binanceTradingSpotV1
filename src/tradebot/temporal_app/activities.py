@@ -1121,9 +1121,7 @@ async def place_order(intent: OrderIntent) -> dict[str, Any]:
 
     # Live: call Binance REST
     client = BinanceRestClient(
-        api_key=settings.binance_api_key,
-        api_secret=settings.binance_api_secret,
-        base_url=settings.binance_rest_url,
+        settings,
     )
     try:
         resp = await client.place_order(
@@ -1165,9 +1163,7 @@ async def cancel_order(symbol: str, order_id: str) -> dict[str, Any]:
 
     settings = Settings()
     client = BinanceRestClient(
-        api_key=settings.binance_api_key,
-        api_secret=settings.binance_api_secret,
-        base_url=settings.binance_rest_url,
+        settings,
     )
     try:
         binance_id = int(order_id) if order_id.isdigit() else None
@@ -1208,9 +1204,7 @@ async def place_protection_orders(position_id: str) -> dict[str, Any]:
         return {"ok": True, "mode": mode, "simulated": True}
 
     client = BinanceRestClient(
-        api_key=settings.binance_api_key,
-        api_secret=settings.binance_api_secret,
-        base_url=settings.binance_rest_url,
+        settings,
     )
     try:
         sl_resp = await client.place_order(
@@ -1285,9 +1279,7 @@ async def update_stop_loss(position_id: str, new_sl: str, symbol: str) -> dict[s
 
     old_sl_order_id = plan_dict.get("sl_order_id")
     client = BinanceRestClient(
-        api_key=settings.binance_api_key,
-        api_secret=settings.binance_api_secret,
-        base_url=settings.binance_rest_url,
+        settings,
     )
     try:
         if old_sl_order_id:
@@ -1639,9 +1631,7 @@ async def reconcile_orders() -> dict[str, Any]:
         return {"ok": True, "fixed": fixed, "mode": mode}
 
     client = BinanceRestClient(
-        api_key=settings.binance_api_key,
-        api_secret=settings.binance_api_secret,
-        base_url=settings.binance_rest_url,
+        settings,
     )
     try:
         for intent in active_intents:

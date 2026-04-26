@@ -339,11 +339,8 @@ class BinanceWsUser:
     async def _cancel_binance_order(self, symbol: str, order_id: int) -> None:
         """F-005: cancel the SL order when all lots are filled."""
         from tradebot.infra.binance.rest import BinanceRestClient
-        client = BinanceRestClient(
-            api_key=self._api_key,
-            api_secret=self._api_secret,
-            base_url=self._rest_url,
-        )
+        from tradebot.config.settings import Settings
+        client = BinanceRestClient(Settings())
         try:
             await client.cancel_order(symbol=symbol, order_id=order_id)
             log.info("user_stream_sl_cancelled", symbol=symbol, order_id=order_id)

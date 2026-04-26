@@ -11,6 +11,7 @@ from temporalio.service import RPCError, RPCStatusCode
 
 from tradebot.config.loader import load_app_config
 from tradebot.infra.temporal.schedules import (
+    CHECK_KLINE_FRESHNESS_SCHEDULE_ID,
     MANAGE_POSITIONS_SCHEDULE_PREFIX,
     PROCESS_CANDLES_SCHEDULE_PREFIX,
     RECONCILE_KLINES_SCHEDULE_ID,
@@ -68,6 +69,7 @@ def test_build_schedule_definitions_uses_expected_intervals_and_cron():
         RECONCILE_KLINES_SCHEDULE_ID,
         RECONCILE_ORDERS_SCHEDULE_ID,
         REFRESH_EXCHANGEINFO_SCHEDULE_ID,
+        CHECK_KLINE_FRESHNESS_SCHEDULE_ID,
         *[f"{PROCESS_CANDLES_SCHEDULE_PREFIX}-{i}" for i in range(shard_count)],
         *[f"{MANAGE_POSITIONS_SCHEDULE_PREFIX}-{i}" for i in range(shard_count)],
     }
@@ -77,6 +79,7 @@ def test_build_schedule_definitions_uses_expected_intervals_and_cron():
     assert by_id[RECONCILE_KLINES_SCHEDULE_ID].schedule.spec.intervals[0].every == timedelta(minutes=30)
     assert by_id[RECONCILE_ORDERS_SCHEDULE_ID].schedule.spec.intervals[0].every == timedelta(minutes=10)
     assert by_id[REFRESH_EXCHANGEINFO_SCHEDULE_ID].schedule.spec.cron_expressions == ["10 3 * * *"]
+    assert by_id[CHECK_KLINE_FRESHNESS_SCHEDULE_ID].schedule.spec.intervals[0].every == timedelta(minutes=1)
 
     # Per-shard schedules — verify tick intervals match config
     candles_tick = timedelta(seconds=cfg.schedules.candles_tick_sec)
@@ -99,7 +102,7 @@ def test_build_schedule_definitions_rejects_invalid_daily_format():
 
 def test_schedule_bootstrap_is_idempotent_with_existing_schedules():
     cfg = _app_config()
-    total = 3 + cfg.sharding.shard_count * 2  # 3 maintenance + 2 per shard
+    total = 4 + cfg.sharding.shard_count * 2  # 4 maintenance + 2 per shard
     client = _FakeScheduleClient(existing_schedule_ids={RECONCILE_ORDERS_SCHEDULE_ID})
 
     async def _case():
@@ -118,7 +121,7 @@ def test_schedule_bootstrap_is_idempotent_with_existing_schedules():
 
 def test_schedule_bootstrap_handles_schedule_already_running_error():
     cfg = _app_config()
-    total = 3 + cfg.sharding.shard_count * 2
+    total = 4 + cfg.sharding.shard_count * 2
     client = _FakeScheduleClient(
         already_running_schedule_ids={RECONCILE_KLINES_SCHEDULE_ID}
     )

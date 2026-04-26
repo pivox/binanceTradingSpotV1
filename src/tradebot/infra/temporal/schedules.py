@@ -22,6 +22,7 @@ RECONCILE_ORDERS_SCHEDULE_ID = "tradebot-reconcile-orders"
 REFRESH_EXCHANGEINFO_SCHEDULE_ID = "tradebot-refresh-exchangeinfo"
 PROCESS_CANDLES_SCHEDULE_PREFIX = "tradebot-process-candles-shard"
 MANAGE_POSITIONS_SCHEDULE_PREFIX = "tradebot-manage-positions-shard"
+CHECK_KLINE_FRESHNESS_SCHEDULE_ID = "tradebot-check-kline-freshness"
 
 _DAILY_HHMM_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
@@ -110,6 +111,22 @@ def _build_schedule_definitions(
             ),
         ),
     ]
+
+    definitions.append(
+        ScheduleDefinition(
+            schedule_id=CHECK_KLINE_FRESHNESS_SCHEDULE_ID,
+            schedule=Schedule(
+                action=ScheduleActionStartWorkflow(
+                    "CheckKlineFreshnessWorkflow",
+                    id=f"{CHECK_KLINE_FRESHNESS_SCHEDULE_ID}-workflow",
+                    task_queue=task_queue,
+                ),
+                spec=ScheduleSpec(
+                    intervals=[ScheduleIntervalSpec(every=timedelta(minutes=1))]
+                ),
+            ),
+        )
+    )
 
     # One schedule per shard for the two high-frequency trading workflows.
     for shard_id in range(shard_count):

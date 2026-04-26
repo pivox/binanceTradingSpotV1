@@ -261,6 +261,34 @@ class ReconcileKlinesWorkflow:
 
 
 @workflow.defn
+class CheckKlineFreshnessWorkflow:
+    """
+    Runs every minute.  Detects stale leading edges for every active
+    symbol/timeframe and, when gaps are found, immediately triggers
+    ReconcileKlinesWorkflow to backfill them without waiting for the
+    30-minute maintenance window.
+    """
+
+    @workflow.run
+    async def run(self) -> dict:
+        result = await workflow.execute_activity(
+            "detect_kline_leading_gaps",
+            start_to_close_timeout=AIO_TIMEOUT,
+            retry_policy=DEFAULT_RETRY,
+        )
+
+        if result.get("gaps_found", 0) > 0:
+            await workflow.execute_child_workflow(
+                ReconcileKlinesWorkflow.run,
+                id=f"reconcile-klines-triggered-{workflow.info().workflow_id}",
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+                parent_close_policy=workflow.ParentClosePolicy.ABANDON,
+            )
+
+        return result
+
+
+@workflow.defn
 class ReconcileOrdersWorkflow:
     @workflow.run
     async def run(self) -> dict:

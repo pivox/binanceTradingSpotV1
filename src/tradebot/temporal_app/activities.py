@@ -1739,3 +1739,82 @@ async def refresh_exchange_info() -> dict[str, Any]:
         "used_weight_1m": used_weight_1m,
         "fetched_at_ms": fetched_at_ms,
     }
+
+
+# Lag tolerance before a timeframe's leading edge is considered stale.
+# 2 steps absorbs WS processing + Temporal scheduling jitter.
+_FRESHNESS_LAG_STEPS: dict[str, int] = {
+    "1m": 2, "5m": 2, "15m": 2, "1h": 2, "4h": 2,
+}
+
+
+@activity.defn(name="detect_kline_leading_gaps")
+async def detect_kline_leading_gaps() -> dict[str, Any]:
+    """
+    For every active symbol and configured timeframe, check whether the most
+    recent candle in the DB is fresh enough.  If the leading edge is stale,
+    insert a candle_gap_request so ReconcileKlinesWorkflow can backfill it.
+    """
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    now_ms = _now_ms()
+    gaps_found = 0
+    symbols_checked = 0
+
+    with session_factory() as session:
+        symbols: list[str] = list(
+            session.scalars(
+                select(ExchangeInfoCache.symbol).where(ExchangeInfoCache.status == "TRADING")
+            )
+        )
+        if not symbols:
+            symbols = list(_target_symbols_for_detection(session))
+
+        for symbol in symbols:
+            symbols_checked += 1
+            for tf in DETECT_RECONCILE_TIMEFRAMES:
+                step_ms = timeframe_to_ms(tf)
+                lag_steps = _FRESHNESS_LAG_STEPS.get(tf, 2)
+                # Latest candle we should already have (with tolerance)
+                expected_latest_ms = (now_ms // step_ms - lag_steps) * step_ms
+
+                max_open = session.scalar(
+                    select(func.max(Candle.open_time_ms)).where(
+                        Candle.symbol == symbol,
+                        Candle.timeframe == tf,
+                    )
+                )
+
+                if max_open is None or int(max_open) < expected_latest_ms:
+                    gap_from = int(max_open) + step_ms if max_open is not None else expected_latest_ms
+                    gap_to = expected_latest_ms
+                    if gap_from > gap_to:
+                        continue
+
+                    # Avoid duplicate requests created in the last 5 minutes
+                    recent_exists = session.scalar(
+                        select(func.count()).select_from(CandleGapRequest).where(
+                            CandleGapRequest.symbol == symbol,
+                            CandleGapRequest.from_open_time_ms == gap_from,
+                            CandleGapRequest.to_open_time_ms == gap_to,
+                            CandleGapRequest.detected_at >= func.now() - text("interval '5 minutes'"),
+                        )
+                    )
+                    if recent_exists:
+                        continue
+
+                    session.add(CandleGapRequest(
+                        symbol=symbol,
+                        from_open_time_ms=gap_from,
+                        to_open_time_ms=gap_to,
+                    ))
+                    gaps_found += 1
+
+        session.commit()
+
+    _activity_log(
+        "info", "detect_kline_leading_gaps_done",
+        symbols_checked=symbols_checked,
+        gaps_found=gaps_found,
+    )
+    return {"gaps_found": gaps_found, "symbols_checked": symbols_checked}

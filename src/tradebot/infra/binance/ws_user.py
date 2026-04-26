@@ -3,13 +3,18 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import aiohttp
 import structlog
 import websockets
 
+if TYPE_CHECKING:
+    from temporalio.client import Client as TemporalClient
+
 log = structlog.get_logger()
+
+TEMPORAL_TASK_QUEUE = "tradebot"
 
 _LISTEN_KEY_RENEW_INTERVAL_S = 25 * 60  # renew every 25 min (Binance expires after 60 min)
 _RECONNECT_BASE_DELAY_S = 2
@@ -44,6 +49,13 @@ _UPD_POSITION_EXIT_PLAN_SQL = """
 UPDATE positions
 SET exit_plan_json = $1
 WHERE id = $2
+"""
+
+_UPD_POSITION_CLOSED_SQL = """
+UPDATE positions
+SET status = 'CLOSED', closed_at_ms = $1
+WHERE id = $2
+  AND status NOT IN ('CLOSED')
 """
 
 # Binance executionReport X field → DB status
@@ -93,6 +105,7 @@ class BinanceWsUser:
         rest_url: str,
         pool: Any,  # asyncpg.Pool
         shard_count: int = 8,
+        temporal_client: Optional[Any] = None,  # temporalio.client.Client
     ) -> None:
         self._api_key = api_key
         self._api_secret = api_secret
@@ -100,6 +113,7 @@ class BinanceWsUser:
         self._rest_url = rest_url.rstrip("/")
         self._pool = pool
         self._shard_count = shard_count
+        self._temporal_client = temporal_client
 
     # ── Listen key management ─────────────────────────────────────────────────
 
@@ -204,6 +218,12 @@ class BinanceWsUser:
                         position_id=pos_id,
                         avg_price=avg_price,
                     )
+                    # F-002: place SL + TP orders via Temporal workflow
+                    if self._temporal_client is not None:
+                        asyncio.create_task(
+                            self._start_post_fill_workflow(pos_id),
+                            name=f"post-fill-{pos_id}",
+                        )
 
                 elif side == "SELL":
                     lot_id = _lot_id_from_intent_key(intent_key)
@@ -220,12 +240,60 @@ class BinanceWsUser:
                             lot_id=lot_id,
                             avg_price=avg_price,
                         )
+                        # F-005: close position when all lots are filled
+                        all_filled = all(lot.get("is_filled") for lot in exit_plan.get("lots", []))
+                        if all_filled:
+                            await conn.execute(_UPD_POSITION_CLOSED_SQL, now_ms, pos_id)
+                            log.info("user_stream_position_closed", position_id=pos_id)
+                            sl_order_id = exit_plan.get("sl_order_id")
+                            if sl_order_id:
+                                asyncio.create_task(
+                                    self._cancel_binance_order(symbol, int(sl_order_id)),
+                                    name=f"cancel-sl-{pos_id}",
+                                )
                     except Exception as exc:
                         log.warning(
                             "user_stream_exit_plan_update_failed",
                             position_id=pos_id,
                             error=str(exc),
                         )
+
+    async def _start_post_fill_workflow(self, position_id: str) -> None:
+        """F-002: launch PostFillSetupWorkflow after BUY fill."""
+        try:
+            await self._temporal_client.start_workflow(  # type: ignore[union-attr]
+                "PostFillSetupWorkflow",
+                position_id,
+                id=f"post-fill-{position_id}",
+                task_queue=TEMPORAL_TASK_QUEUE,
+            )
+            log.info("user_stream_post_fill_workflow_started", position_id=position_id)
+        except Exception as exc:
+            log.warning("user_stream_post_fill_workflow_failed",
+                        position_id=position_id, error=str(exc))
+
+    async def _cancel_binance_order(self, symbol: str, order_id: int) -> None:
+        """F-005: cancel the SL order when all lots are filled."""
+        try:
+            from tradebot.infra.binance._signing import add_auth_params
+            params: dict = {"symbol": symbol, "orderId": order_id}
+            add_auth_params(params, self._api_secret)
+            headers = {"X-MBX-APIKEY": self._api_key}
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.delete(
+                    f"{self._rest_url}/api/v3/order",
+                    params=params,
+                    headers=headers,
+                ) as resp:
+                    if resp.status not in (200, 204, 400):  # 400 may be -2011 (already gone)
+                        body = (await resp.text())[:200]
+                        log.warning("user_stream_cancel_sl_failed", symbol=symbol,
+                                    order_id=order_id, status=resp.status, body=body)
+                    else:
+                        log.info("user_stream_sl_cancelled", symbol=symbol, order_id=order_id)
+        except Exception as exc:
+            log.warning("user_stream_cancel_sl_error", symbol=symbol,
+                        order_id=order_id, error=str(exc))
 
     async def _handle_message(self, msg: dict) -> None:
         event_type = str(msg.get("e", ""))

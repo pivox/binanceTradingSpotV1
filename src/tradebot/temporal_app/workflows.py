@@ -311,6 +311,88 @@ class RefreshExchangeInfoWorkflow:
 
 
 @workflow.defn
+class InitialBackfillWorkflow:
+    """
+    Launched once per calendar day at worker startup.
+    Ensures every active symbol has at least `min_candles` historical klines on
+    all configured timeframes so technical indicators can produce valid values.
+    Sequential per symbol to respect Binance rate limits.
+    """
+
+    @workflow.run
+    async def run(self, min_candles: int = 200) -> dict:
+        symbols: list[str] = await workflow.execute_activity(
+            "list_warmup_symbols",
+            start_to_close_timeout=AIO_TIMEOUT,
+            retry_policy=DEFAULT_RETRY,
+        )
+
+        timeframes = ["4h", "1h", "15m", "5m", "1m"]  # longest first to warm up indicators
+        total_inserted = 0
+        skipped = 0
+
+        for symbol in symbols:
+            for tf in timeframes:
+                result = await workflow.execute_activity(
+                    "ensure_indicator_warmup",
+                    args=[symbol, tf, min_candles],
+                    start_to_close_timeout=timedelta(minutes=5),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+                if result.get("already_sufficient") or result.get("skipped"):
+                    skipped += 1
+                else:
+                    total_inserted += result.get("inserted", 0)
+
+        return {
+            "ok": True,
+            "symbols": len(symbols),
+            "timeframes": len(timeframes),
+            "inserted": total_inserted,
+            "skipped": skipped,
+        }
+
+
+@workflow.defn
+class BacktestDataFetchWorkflow:
+    """
+    On-demand workflow: fetches all klines for a symbol in [from_ms, to_ms]
+    across the requested timeframes.  Triggered manually via Temporal UI / CLI
+    or a future API endpoint to prepare historical data for backtesting.
+    """
+
+    @workflow.run
+    async def run(
+        self,
+        symbol: str,
+        from_ms: int,
+        to_ms: int,
+        timeframes: list[str] | None = None,
+    ) -> dict:
+        tfs = timeframes or ["4h", "1h", "15m", "5m", "1m"]
+        total_inserted = 0
+
+        for tf in tfs:
+            result = await workflow.execute_activity(
+                "fetch_historical_klines",
+                args=[symbol, tf, from_ms, to_ms],
+                # Long timeout: large date ranges can need many paginated requests.
+                start_to_close_timeout=timedelta(minutes=30),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+            total_inserted += result.get("inserted", 0)
+
+        return {
+            "ok": True,
+            "symbol": symbol,
+            "from_ms": from_ms,
+            "to_ms": to_ms,
+            "timeframes": tfs,
+            "inserted": total_inserted,
+        }
+
+
+@workflow.defn
 class IntentDispatcherWorkflow:
     """
     Optional: isolate execution of an intent (BUY/SELL) + error handling.

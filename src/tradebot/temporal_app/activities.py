@@ -1818,3 +1818,126 @@ async def detect_kline_leading_gaps() -> dict[str, Any]:
         gaps_found=gaps_found,
     )
     return {"gaps_found": gaps_found, "symbols_checked": symbols_checked}
+
+
+# =========================
+# Historical Data / Warmup
+# =========================
+
+# Minimum candles needed to produce a valid EMA200 (the longest warmup indicator).
+MIN_WARMUP_CANDLES = 200
+
+
+@activity.defn(name="list_warmup_symbols")
+async def list_warmup_symbols() -> list[str]:
+    """
+    Returns the list of symbols that need indicator warmup.
+    Priority: WARMUP_SYMBOLS env var > exchange_info_cache TRADING symbols > default.
+    """
+    raw = os.environ.get("WARMUP_SYMBOLS", "").strip()
+    if raw:
+        return [s.strip().upper() for s in raw.split(",") if s.strip()]
+
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    with session_factory() as session:
+        symbols = list(
+            session.scalars(
+                select(ExchangeInfoCache.symbol).where(ExchangeInfoCache.status == "TRADING")
+            )
+        )
+    return symbols if symbols else list(DEFAULT_RECONCILE_SYMBOLS)
+
+
+@activity.defn(name="ensure_indicator_warmup")
+async def ensure_indicator_warmup(
+    symbol: str, timeframe: str, min_candles: int = MIN_WARMUP_CANDLES
+) -> dict[str, Any]:
+    """
+    Ensures at least `min_candles` exist for (symbol, timeframe).
+    Backfills backwards from the earliest existing candle (or from now) if needed.
+    """
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    base_url = os.environ.get("BINANCE_REST_URL", BINANCE_REST_URL).strip() or BINANCE_REST_URL
+    step_ms = timeframe_to_ms(timeframe)
+    now_ms = _now_ms()
+
+    with session_factory() as session:
+        count: int = session.scalar(
+            select(func.count()).select_from(Candle).where(
+                Candle.symbol == symbol, Candle.timeframe == timeframe,
+            )
+        ) or 0
+        min_open: int | None = session.scalar(
+            select(func.min(Candle.open_time_ms)).where(
+                Candle.symbol == symbol, Candle.timeframe == timeframe,
+            )
+        )
+
+    if count >= min_candles:
+        return {"symbol": symbol, "timeframe": timeframe,
+                "already_sufficient": True, "count": count, "inserted": 0}
+
+    needed = min_candles - count
+    if min_open is not None:
+        # Extend the window backwards from the earliest stored candle.
+        to_ms = int(min_open) - step_ms
+        from_ms = to_ms - (needed - 1) * step_ms
+    else:
+        # No candles at all — take the last min_candles up to the latest completed candle.
+        latest_complete_ms = (now_ms // step_ms - 1) * step_ms
+        from_ms = latest_complete_ms - (min_candles - 1) * step_ms
+        to_ms = latest_complete_ms
+
+    from_ms = max(from_ms, 0)
+    if from_ms > to_ms:
+        return {"symbol": symbol, "timeframe": timeframe,
+                "already_sufficient": False, "inserted": 0, "skipped": True}
+
+    inserted = 0
+    timeout = aiohttp.ClientTimeout(total=60)
+    async with aiohttp.ClientSession(timeout=timeout) as http_session:
+        with session_factory() as session:
+            inserted, _ = await _backfill_job_from_binance(
+                session, http_session,
+                base_url=base_url, symbol=symbol, timeframe=timeframe,
+                from_open_time_ms=from_ms, to_open_time_ms=to_ms,
+                shard_count=settings.shard_count,
+            )
+            session.commit()
+
+    _activity_log("info", "ensure_indicator_warmup_done",
+                  symbol=symbol, timeframe=timeframe, inserted=inserted, was_count=count)
+    return {"symbol": symbol, "timeframe": timeframe,
+            "already_sufficient": False, "inserted": inserted}
+
+
+@activity.defn(name="fetch_historical_klines")
+async def fetch_historical_klines(
+    symbol: str, timeframe: str, from_ms: int, to_ms: int
+) -> dict[str, Any]:
+    """
+    Fetches and upserts ALL klines in [from_ms, to_ms] from Binance REST API.
+    Used by BacktestDataFetchWorkflow for arbitrary date-range backfills.
+    """
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    base_url = os.environ.get("BINANCE_REST_URL", BINANCE_REST_URL).strip() or BINANCE_REST_URL
+
+    inserted = 0
+    timeout = aiohttp.ClientTimeout(total=120)
+    async with aiohttp.ClientSession(timeout=timeout) as http_session:
+        with session_factory() as session:
+            inserted, _ = await _backfill_job_from_binance(
+                session, http_session,
+                base_url=base_url, symbol=symbol, timeframe=timeframe,
+                from_open_time_ms=from_ms, to_open_time_ms=to_ms,
+                shard_count=settings.shard_count,
+            )
+            session.commit()
+
+    _activity_log("info", "fetch_historical_klines_done",
+                  symbol=symbol, timeframe=timeframe, from_ms=from_ms, to_ms=to_ms, inserted=inserted)
+    return {"symbol": symbol, "timeframe": timeframe,
+            "from_ms": from_ms, "to_ms": to_ms, "inserted": inserted}

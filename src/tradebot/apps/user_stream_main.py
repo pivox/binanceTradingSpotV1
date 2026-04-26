@@ -5,6 +5,7 @@ import os
 
 import asyncpg
 from dotenv import load_dotenv
+from temporalio.client import Client as TemporalClient
 
 from tradebot.infra.binance.ws_user import BinanceWsUser
 from tradebot.observability.logging import configure_logging
@@ -39,16 +40,28 @@ async def _main_async() -> None:
     )
     shard_count = int(os.environ.get("SHARD_COUNT", "8"))
 
+    temporal_address = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233").strip()
     pool = await _get_pool()
-    client = BinanceWsUser(
+    try:
+        temporal_client: TemporalClient | None = await TemporalClient.connect(temporal_address)
+    except Exception as exc:
+        import structlog
+        structlog.get_logger().warning(
+            "user_stream_temporal_unavailable", error=str(exc),
+            note="PostFillSetupWorkflow will not be triggered",
+        )
+        temporal_client = None
+
+    ws_client = BinanceWsUser(
         api_key=api_key,
         api_secret=api_secret,
         ws_url=ws_url,
         rest_url=rest_url,
         pool=pool,
         shard_count=shard_count,
+        temporal_client=temporal_client,
     )
-    await client.run()
+    await ws_client.run()
 
 
 def main() -> None:

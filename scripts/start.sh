@@ -82,6 +82,13 @@ poetry -C "$ROOT" run python -m tradebot.apps.daemon_api_main \
 PIDS+=($!)
 echo "[start.sh] daemon_api        PID=${PIDS[-1]}  →  logs/api.log"
 
+# ── 7. User data stream (Binance executionReport) ────────────────────────────
+echo "[start.sh] Starting user_stream..."
+poetry -C "$ROOT" run python -m tradebot.apps.user_stream_main \
+  >"$LOGS_DIR/user_stream.log" 2>&1 &
+PIDS+=($!)
+echo "[start.sh] user_stream       PID=${PIDS[-1]}  →  logs/user_stream.log"
+
 echo ""
 echo "[start.sh] All processes running. Press Ctrl+C to stop."
 echo "           API       → http://localhost:${API_PORT:-8000}"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from temporalio import workflow
-from temporalio.common import RetryPolicy
+from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 
 from .types import CandleCloseEvent, Position
 
@@ -48,6 +48,23 @@ class ConsumeCandleEventsWorkflow:
                 retry_policy=DEFAULT_RETRY,
             )
             processed += 1
+
+            # F-001: 1m close triggers cascade evaluation
+            if evt.timeframe == "1m":
+                has_active: bool = await workflow.execute_activity(
+                    "check_active_position",
+                    arg=evt.symbol,
+                    start_to_close_timeout=AIO_TIMEOUT,
+                    retry_policy=DEFAULT_RETRY,
+                )
+                if not has_active:
+                    await workflow.execute_child_workflow(
+                        CascadeValidateAndEnterWorkflow.run,
+                        args=[evt.symbol, evt.open_time_ms],
+                        id=f"cascade-{evt.symbol}-{evt.open_time_ms}",
+                        id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+                        parent_close_policy=workflow.ParentClosePolicy.ABANDON,
+                    )
 
         if events:
             await workflow.execute_activity(
@@ -121,6 +138,24 @@ class CascadeValidateAndEnterWorkflow:
 
 
 @workflow.defn
+class PostFillSetupWorkflow:
+    """
+    Triggered by ws_user after a BUY fill.
+    Places SL + TP_A + TP_B protection orders on Binance.
+    """
+
+    @workflow.run
+    async def run(self, position_id: str) -> dict:
+        result = await workflow.execute_activity(
+            "place_protection_orders",
+            arg=position_id,
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=RetryPolicy(maximum_attempts=5),
+        )
+        return {"ok": True, "position_id": position_id, "orders": result}
+
+
+@workflow.defn
 class ProcessClosedCandlesWorkflow:
     """
     Wrapper workflow triggered by a Schedule:
@@ -184,10 +219,24 @@ class ManageOpenPositionsWorkflow:
                     )
                     acted += 1
 
+                elif a.get("type") == "UPDATE_SL":
+                    # F-004: propagate stop-loss update to Binance
+                    new_sl = a.get("new_stop_loss") or a.get("new_trailing")
+                    if new_sl:
+                        await workflow.execute_activity(
+                            "update_stop_loss",
+                            args=[pos.position_id, str(new_sl), pos.symbol],
+                            start_to_close_timeout=timedelta(seconds=20),
+                            retry_policy=RetryPolicy(maximum_attempts=3),
+                        )
+                        acted += 1
+
             next_in = int(out.get("next_check_in_ms", 10_000))
+            # F-003: pass candle high so activity can advance high_since_entry
+            patch = {"next_check_in_ms": next_in, "new_high": out.get("new_high")}
             await workflow.execute_activity(
                 "update_position_after_actions",
-                args=[pos.position_id, {"next_check_in_ms": next_in}],
+                args=[pos.position_id, patch],
                 start_to_close_timeout=AIO_TIMEOUT,
                 retry_policy=DEFAULT_RETRY,
             )
@@ -212,6 +261,34 @@ class ReconcileKlinesWorkflow:
 
 
 @workflow.defn
+class CheckKlineFreshnessWorkflow:
+    """
+    Runs every minute.  Detects stale leading edges for every active
+    symbol/timeframe and, when gaps are found, immediately triggers
+    ReconcileKlinesWorkflow to backfill them without waiting for the
+    30-minute maintenance window.
+    """
+
+    @workflow.run
+    async def run(self) -> dict:
+        result = await workflow.execute_activity(
+            "detect_kline_leading_gaps",
+            start_to_close_timeout=AIO_TIMEOUT,
+            retry_policy=DEFAULT_RETRY,
+        )
+
+        if result.get("gaps_found", 0) > 0:
+            await workflow.execute_child_workflow(
+                ReconcileKlinesWorkflow.run,
+                id=f"reconcile-klines-triggered-{workflow.info().workflow_id}",
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+                parent_close_policy=workflow.ParentClosePolicy.ABANDON,
+            )
+
+        return result
+
+
+@workflow.defn
 class ReconcileOrdersWorkflow:
     @workflow.run
     async def run(self) -> dict:
@@ -231,6 +308,88 @@ class RefreshExchangeInfoWorkflow:
             start_to_close_timeout=timedelta(minutes=5),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
+
+
+@workflow.defn
+class InitialBackfillWorkflow:
+    """
+    Launched once per calendar day at worker startup.
+    Ensures every active symbol has at least `min_candles` historical klines on
+    all configured timeframes so technical indicators can produce valid values.
+    Sequential per symbol to respect Binance rate limits.
+    """
+
+    @workflow.run
+    async def run(self, min_candles: int = 200) -> dict:
+        symbols: list[str] = await workflow.execute_activity(
+            "list_warmup_symbols",
+            start_to_close_timeout=AIO_TIMEOUT,
+            retry_policy=DEFAULT_RETRY,
+        )
+
+        timeframes = ["4h", "1h", "15m", "5m", "1m"]  # longest first to warm up indicators
+        total_inserted = 0
+        skipped = 0
+
+        for symbol in symbols:
+            for tf in timeframes:
+                result = await workflow.execute_activity(
+                    "ensure_indicator_warmup",
+                    args=[symbol, tf, min_candles],
+                    start_to_close_timeout=timedelta(minutes=5),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+                if result.get("already_sufficient") or result.get("skipped"):
+                    skipped += 1
+                else:
+                    total_inserted += result.get("inserted", 0)
+
+        return {
+            "ok": True,
+            "symbols": len(symbols),
+            "timeframes": len(timeframes),
+            "inserted": total_inserted,
+            "skipped": skipped,
+        }
+
+
+@workflow.defn
+class BacktestDataFetchWorkflow:
+    """
+    On-demand workflow: fetches all klines for a symbol in [from_ms, to_ms]
+    across the requested timeframes.  Triggered manually via Temporal UI / CLI
+    or a future API endpoint to prepare historical data for backtesting.
+    """
+
+    @workflow.run
+    async def run(
+        self,
+        symbol: str,
+        from_ms: int,
+        to_ms: int,
+        timeframes: list[str] | None = None,
+    ) -> dict:
+        tfs = timeframes or ["4h", "1h", "15m", "5m", "1m"]
+        total_inserted = 0
+
+        for tf in tfs:
+            result = await workflow.execute_activity(
+                "fetch_historical_klines",
+                args=[symbol, tf, from_ms, to_ms],
+                # Long timeout: large date ranges can need many paginated requests.
+                start_to_close_timeout=timedelta(minutes=30),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+            total_inserted += result.get("inserted", 0)
+
+        return {
+            "ok": True,
+            "symbol": symbol,
+            "from_ms": from_ms,
+            "to_ms": to_ms,
+            "timeframes": tfs,
+            "inserted": total_inserted,
+        }
 
 
 @workflow.defn

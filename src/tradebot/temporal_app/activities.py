@@ -10,6 +10,7 @@ from decimal import Decimal
 from temporalio import activity
 from typing import Any, Optional
 
+import json
 import aiohttp
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -1039,6 +1040,11 @@ async def create_sell_intent(
 
     with session_factory() as session:
         OrderIntentRepoSql(session).create(domain_intent)
+        # F-006: transition position to CLOSING on first SELL intent
+        session.execute(
+            text("UPDATE positions SET status='CLOSING' WHERE id=:id AND status='ACTIVE'"),
+            {"id": position_id},
+        )
         session.commit()
 
     _activity_log("info", "sell_intent_created", intent_key=intent_key, symbol=symbol, lot=lot_id)
@@ -1050,6 +1056,16 @@ async def create_sell_intent(
         open_time_ms=0,
         payload={"order_id": intent_id, "lot_id": lot_id, "qty": str(qty)},
     )
+
+
+# F-001: duplicate-position guard used by ConsumeCandleEventsWorkflow
+@activity.defn(name="check_active_position")
+async def check_active_position(symbol: str) -> bool:
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    with session_factory() as session:
+        pos = PositionRepoSql(session).get_open_by_symbol(symbol)
+    return pos is not None
 
 
 # =========================
@@ -1111,6 +1127,12 @@ async def place_order(intent: OrderIntent) -> dict[str, Any]:
                 OrderIntentStatus.SENT,
                 binance_order_id=binance_order_id,
             )
+            # F-006: mark position as sent to exchange
+            if domain_intent.side == DomainSide.BUY and domain_intent.position_id:
+                session.execute(
+                    text("UPDATE positions SET status='OPEN_ENTRY_SENT' WHERE id=:id AND status='PENDING_ENTRY'"),
+                    {"id": domain_intent.position_id},
+                )
             session.commit()
         _activity_log("info", "place_order_sent", intent_key=intent.intent_key, binance_id=binance_order_id)
         return {"ok": True, "mode": mode, "binance_order_id": binance_order_id, "client_order_id": intent.intent_key}
@@ -1144,6 +1166,138 @@ async def cancel_order(symbol: str, order_id: str) -> dict[str, Any]:
         raise
     finally:
         await client.close()
+
+
+# F-002: place SL + TP-A + TP-B on Binance immediately after BUY fill
+@activity.defn(name="place_protection_orders")
+async def place_protection_orders(position_id: str) -> dict[str, Any]:
+    settings = Settings()
+    mode, _ = _get_execution_mode()
+    session_factory = create_session_factory(settings)
+
+    with session_factory() as session:
+        domain_pos = PositionRepoSql(session).get_by_id(position_id)
+    if domain_pos is None:
+        raise RuntimeError(f"position not found: {position_id}")
+
+    exit_plan = domain_pos.exit_plan
+    entry = domain_pos.entry_price
+    r = exit_plan.r_distance
+    tp_a = entry + Decimal(str(exit_plan.lot_a.rule.r_multiple)) * r
+    tp_b = entry + Decimal(str(exit_plan.lot_b.rule.r_multiple)) * r
+    sl_qty = sum(lot.quantity for lot in exit_plan.lots)
+
+    if mode != "live":
+        _activity_log("info", "place_protection_orders_simulated", position_id=position_id, mode=mode)
+        return {"ok": True, "mode": mode, "simulated": True}
+
+    client = BinanceRestClient(
+        api_key=settings.binance_api_key,
+        api_secret=settings.binance_api_secret,
+        base_url=settings.binance_rest_url,
+    )
+    try:
+        sl_resp = await client.place_order(
+            symbol=domain_pos.symbol, side="SELL", order_type="STOP_LOSS",
+            quantity=sl_qty, stop_price=domain_pos.stop_loss,
+            client_order_id=f"sl:{position_id}",
+        )
+        sl_order_id = int((sl_resp.data or {}).get("orderId", 0)) or None
+
+        tp_a_resp = await client.place_order(
+            symbol=domain_pos.symbol, side="SELL", order_type="LIMIT",
+            quantity=exit_plan.lot_a.quantity, price=tp_a,
+            client_order_id=f"tp_a:{position_id}",
+        )
+        tp_a_order_id = int((tp_a_resp.data or {}).get("orderId", 0)) or None
+
+        tp_b_resp = await client.place_order(
+            symbol=domain_pos.symbol, side="SELL", order_type="LIMIT",
+            quantity=exit_plan.lot_b.quantity, price=tp_b,
+            client_order_id=f"tp_b:{position_id}",
+        )
+        tp_b_order_id = int((tp_b_resp.data or {}).get("orderId", 0)) or None
+    finally:
+        await client.close()
+
+    # Persist binance order IDs into exit_plan_json
+    from tradebot.infra.db.repositories._serializers import exit_plan_to_json
+    exit_plan.lot_a.binance_order_id = tp_a_order_id
+    exit_plan.lot_b.binance_order_id = tp_b_order_id
+    plan_dict = json.loads(exit_plan_to_json(exit_plan))
+    plan_dict["sl_order_id"] = sl_order_id
+    with session_factory() as session:
+        session.execute(
+            text("UPDATE positions SET exit_plan_json=:p WHERE id=:id"),
+            {"p": json.dumps(plan_dict), "id": position_id},
+        )
+        session.commit()
+
+    _activity_log("info", "place_protection_orders_done", position_id=position_id,
+                  sl=sl_order_id, tp_a=tp_a_order_id, tp_b=tp_b_order_id)
+    return {"ok": True, "mode": "live", "sl_order_id": sl_order_id,
+            "tp_a_order_id": tp_a_order_id, "tp_b_order_id": tp_b_order_id}
+
+
+# F-004: cancel old SL order and place a new one at updated level
+@activity.defn(name="update_stop_loss")
+async def update_stop_loss(position_id: str, new_sl: str, symbol: str) -> dict[str, Any]:
+    settings = Settings()
+    mode, _ = _get_execution_mode()
+    session_factory = create_session_factory(settings)
+    new_sl_dec = Decimal(new_sl)
+
+    with session_factory() as session:
+        row = session.execute(
+            text("SELECT exit_plan_json, quantity_total FROM positions WHERE id=:id"),
+            {"id": position_id},
+        ).fetchone()
+    if row is None:
+        raise RuntimeError(f"position not found: {position_id}")
+
+    plan_dict: dict = json.loads(row[0]) if row[0] else {}
+    qty = Decimal(str(row[1]))
+
+    if mode != "live":
+        with session_factory() as session:
+            session.execute(
+                text("UPDATE positions SET stop_loss=:sl WHERE id=:id"),
+                {"sl": str(new_sl_dec), "id": position_id},
+            )
+            session.commit()
+        return {"ok": True, "mode": mode, "simulated": True}
+
+    old_sl_order_id = plan_dict.get("sl_order_id")
+    client = BinanceRestClient(
+        api_key=settings.binance_api_key,
+        api_secret=settings.binance_api_secret,
+        base_url=settings.binance_rest_url,
+    )
+    try:
+        if old_sl_order_id:
+            try:
+                await client.cancel_order(symbol=symbol, order_id=int(old_sl_order_id))
+            except Exception as exc:
+                _activity_log("warning", "update_sl_cancel_failed", error=str(exc))
+        new_resp = await client.place_order(
+            symbol=symbol, side="SELL", order_type="STOP_LOSS",
+            quantity=qty, stop_price=new_sl_dec,
+            client_order_id=f"sl_upd:{position_id}:{int(time.time())}",
+        )
+        new_sl_order_id = int((new_resp.data or {}).get("orderId", 0)) or None
+    finally:
+        await client.close()
+
+    plan_dict["sl_order_id"] = new_sl_order_id
+    with session_factory() as session:
+        session.execute(
+            text("UPDATE positions SET stop_loss=:sl, exit_plan_json=:p WHERE id=:id"),
+            {"sl": str(new_sl_dec), "p": json.dumps(plan_dict), "id": position_id},
+        )
+        session.commit()
+
+    _activity_log("info", "update_stop_loss_done", position_id=position_id, new_sl=new_sl)
+    return {"ok": True, "mode": "live", "new_sl_order_id": new_sl_order_id}
 
 
 # =========================
@@ -1253,7 +1407,8 @@ async def apply_exit_engine(pos: Position) -> dict[str, Any]:
                 "reason": intent.reason.value,
             })
 
-    return {"actions": actions, "next_check_in_ms": 10_000}
+    # F-003: expose current candle high so the workflow can update high_since_entry
+    return {"actions": actions, "next_check_in_ms": 10_000, "new_high": float(candle_5m.high)}
 
 
 @activity.defn(name="update_position_after_actions")
@@ -1270,7 +1425,13 @@ async def update_position_after_actions(
             _activity_log("warning", "update_position_not_found", position_id=position_id)
             return
         from dataclasses import replace as dc_replace
-        updated = dc_replace(domain_pos, last_checked_ms=now_ms)
+        new_high_val = patch.get("new_high")
+        new_high = (
+            Decimal(str(new_high_val))
+            if new_high_val is not None and Decimal(str(new_high_val)) > domain_pos.high_since_entry
+            else domain_pos.high_since_entry
+        )
+        updated = dc_replace(domain_pos, last_checked_ms=now_ms, high_since_entry=new_high)
         repo.update(updated)
         session.commit()
     _activity_log("info", "update_position", position_id=position_id)
@@ -1578,3 +1739,205 @@ async def refresh_exchange_info() -> dict[str, Any]:
         "used_weight_1m": used_weight_1m,
         "fetched_at_ms": fetched_at_ms,
     }
+
+
+# Lag tolerance before a timeframe's leading edge is considered stale.
+# 2 steps absorbs WS processing + Temporal scheduling jitter.
+_FRESHNESS_LAG_STEPS: dict[str, int] = {
+    "1m": 2, "5m": 2, "15m": 2, "1h": 2, "4h": 2,
+}
+
+
+@activity.defn(name="detect_kline_leading_gaps")
+async def detect_kline_leading_gaps() -> dict[str, Any]:
+    """
+    For every active symbol and configured timeframe, check whether the most
+    recent candle in the DB is fresh enough.  If the leading edge is stale,
+    insert a candle_gap_request so ReconcileKlinesWorkflow can backfill it.
+    """
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    now_ms = _now_ms()
+    gaps_found = 0
+    symbols_checked = 0
+
+    with session_factory() as session:
+        symbols: list[str] = list(
+            session.scalars(
+                select(ExchangeInfoCache.symbol).where(ExchangeInfoCache.status == "TRADING")
+            )
+        )
+        if not symbols:
+            symbols = list(_target_symbols_for_detection(session))
+
+        for symbol in symbols:
+            symbols_checked += 1
+            for tf in DETECT_RECONCILE_TIMEFRAMES:
+                step_ms = timeframe_to_ms(tf)
+                lag_steps = _FRESHNESS_LAG_STEPS.get(tf, 2)
+                # Latest candle we should already have (with tolerance)
+                expected_latest_ms = (now_ms // step_ms - lag_steps) * step_ms
+
+                max_open = session.scalar(
+                    select(func.max(Candle.open_time_ms)).where(
+                        Candle.symbol == symbol,
+                        Candle.timeframe == tf,
+                    )
+                )
+
+                if max_open is None or int(max_open) < expected_latest_ms:
+                    gap_from = int(max_open) + step_ms if max_open is not None else expected_latest_ms
+                    gap_to = expected_latest_ms
+                    if gap_from > gap_to:
+                        continue
+
+                    # Avoid duplicate requests created in the last 5 minutes
+                    recent_exists = session.scalar(
+                        select(func.count()).select_from(CandleGapRequest).where(
+                            CandleGapRequest.symbol == symbol,
+                            CandleGapRequest.from_open_time_ms == gap_from,
+                            CandleGapRequest.to_open_time_ms == gap_to,
+                            CandleGapRequest.detected_at >= func.now() - text("interval '5 minutes'"),
+                        )
+                    )
+                    if recent_exists:
+                        continue
+
+                    session.add(CandleGapRequest(
+                        symbol=symbol,
+                        from_open_time_ms=gap_from,
+                        to_open_time_ms=gap_to,
+                    ))
+                    gaps_found += 1
+
+        session.commit()
+
+    _activity_log(
+        "info", "detect_kline_leading_gaps_done",
+        symbols_checked=symbols_checked,
+        gaps_found=gaps_found,
+    )
+    return {"gaps_found": gaps_found, "symbols_checked": symbols_checked}
+
+
+# =========================
+# Historical Data / Warmup
+# =========================
+
+# Minimum candles needed to produce a valid EMA200 (the longest warmup indicator).
+MIN_WARMUP_CANDLES = 200
+
+
+@activity.defn(name="list_warmup_symbols")
+async def list_warmup_symbols() -> list[str]:
+    """
+    Returns the list of symbols that need indicator warmup.
+    Priority: WARMUP_SYMBOLS env var > exchange_info_cache TRADING symbols > default.
+    """
+    raw = os.environ.get("WARMUP_SYMBOLS", "").strip()
+    if raw:
+        return [s.strip().upper() for s in raw.split(",") if s.strip()]
+
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    with session_factory() as session:
+        symbols = list(
+            session.scalars(
+                select(ExchangeInfoCache.symbol).where(ExchangeInfoCache.status == "TRADING")
+            )
+        )
+    return symbols if symbols else list(DEFAULT_RECONCILE_SYMBOLS)
+
+
+@activity.defn(name="ensure_indicator_warmup")
+async def ensure_indicator_warmup(
+    symbol: str, timeframe: str, min_candles: int = MIN_WARMUP_CANDLES
+) -> dict[str, Any]:
+    """
+    Ensures at least `min_candles` exist for (symbol, timeframe).
+    Backfills backwards from the earliest existing candle (or from now) if needed.
+    """
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    base_url = os.environ.get("BINANCE_REST_URL", BINANCE_REST_URL).strip() or BINANCE_REST_URL
+    step_ms = timeframe_to_ms(timeframe)
+    now_ms = _now_ms()
+
+    with session_factory() as session:
+        count: int = session.scalar(
+            select(func.count()).select_from(Candle).where(
+                Candle.symbol == symbol, Candle.timeframe == timeframe,
+            )
+        ) or 0
+        min_open: int | None = session.scalar(
+            select(func.min(Candle.open_time_ms)).where(
+                Candle.symbol == symbol, Candle.timeframe == timeframe,
+            )
+        )
+
+    if count >= min_candles:
+        return {"symbol": symbol, "timeframe": timeframe,
+                "already_sufficient": True, "count": count, "inserted": 0}
+
+    needed = min_candles - count
+    if min_open is not None:
+        # Extend the window backwards from the earliest stored candle.
+        to_ms = int(min_open) - step_ms
+        from_ms = to_ms - (needed - 1) * step_ms
+    else:
+        # No candles at all — take the last min_candles up to the latest completed candle.
+        latest_complete_ms = (now_ms // step_ms - 1) * step_ms
+        from_ms = latest_complete_ms - (min_candles - 1) * step_ms
+        to_ms = latest_complete_ms
+
+    from_ms = max(from_ms, 0)
+    if from_ms > to_ms:
+        return {"symbol": symbol, "timeframe": timeframe,
+                "already_sufficient": False, "inserted": 0, "skipped": True}
+
+    inserted = 0
+    timeout = aiohttp.ClientTimeout(total=60)
+    async with aiohttp.ClientSession(timeout=timeout) as http_session:
+        with session_factory() as session:
+            inserted, _ = await _backfill_job_from_binance(
+                session, http_session,
+                base_url=base_url, symbol=symbol, timeframe=timeframe,
+                from_open_time_ms=from_ms, to_open_time_ms=to_ms,
+                shard_count=settings.shard_count,
+            )
+            session.commit()
+
+    _activity_log("info", "ensure_indicator_warmup_done",
+                  symbol=symbol, timeframe=timeframe, inserted=inserted, was_count=count)
+    return {"symbol": symbol, "timeframe": timeframe,
+            "already_sufficient": False, "inserted": inserted}
+
+
+@activity.defn(name="fetch_historical_klines")
+async def fetch_historical_klines(
+    symbol: str, timeframe: str, from_ms: int, to_ms: int
+) -> dict[str, Any]:
+    """
+    Fetches and upserts ALL klines in [from_ms, to_ms] from Binance REST API.
+    Used by BacktestDataFetchWorkflow for arbitrary date-range backfills.
+    """
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    base_url = os.environ.get("BINANCE_REST_URL", BINANCE_REST_URL).strip() or BINANCE_REST_URL
+
+    inserted = 0
+    timeout = aiohttp.ClientTimeout(total=120)
+    async with aiohttp.ClientSession(timeout=timeout) as http_session:
+        with session_factory() as session:
+            inserted, _ = await _backfill_job_from_binance(
+                session, http_session,
+                base_url=base_url, symbol=symbol, timeframe=timeframe,
+                from_open_time_ms=from_ms, to_open_time_ms=to_ms,
+                shard_count=settings.shard_count,
+            )
+            session.commit()
+
+    _activity_log("info", "fetch_historical_klines_done",
+                  symbol=symbol, timeframe=timeframe, from_ms=from_ms, to_ms=to_ms, inserted=inserted)
+    return {"symbol": symbol, "timeframe": timeframe,
+            "from_ms": from_ms, "to_ms": to_ms, "inserted": inserted}

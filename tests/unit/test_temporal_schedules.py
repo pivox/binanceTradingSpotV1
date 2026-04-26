@@ -11,6 +11,9 @@ from temporalio.service import RPCError, RPCStatusCode
 
 from tradebot.config.loader import load_app_config
 from tradebot.infra.temporal.schedules import (
+    CHECK_KLINE_FRESHNESS_SCHEDULE_ID,
+    MANAGE_POSITIONS_SCHEDULE_PREFIX,
+    PROCESS_CANDLES_SCHEDULE_PREFIX,
     RECONCILE_KLINES_SCHEDULE_ID,
     RECONCILE_ORDERS_SCHEDULE_ID,
     REFRESH_EXCHANGEINFO_SCHEDULE_ID,
@@ -57,23 +60,33 @@ def _app_config():
 
 
 def test_build_schedule_definitions_uses_expected_intervals_and_cron():
-    defs = _build_schedule_definitions(_app_config(), task_queue="tradebot")
+    cfg = _app_config()
+    defs = _build_schedule_definitions(cfg, task_queue="tradebot")
     by_id = {item.schedule_id: item for item in defs}
 
-    assert set(by_id) == {
+    shard_count = cfg.sharding.shard_count  # 8
+    expected_ids = {
         RECONCILE_KLINES_SCHEDULE_ID,
         RECONCILE_ORDERS_SCHEDULE_ID,
         REFRESH_EXCHANGEINFO_SCHEDULE_ID,
+        CHECK_KLINE_FRESHNESS_SCHEDULE_ID,
+        *[f"{PROCESS_CANDLES_SCHEDULE_PREFIX}-{i}" for i in range(shard_count)],
+        *[f"{MANAGE_POSITIONS_SCHEDULE_PREFIX}-{i}" for i in range(shard_count)],
     }
-    assert by_id[RECONCILE_KLINES_SCHEDULE_ID].schedule.spec.intervals[
-        0
-    ].every == timedelta(minutes=30)
-    assert by_id[RECONCILE_ORDERS_SCHEDULE_ID].schedule.spec.intervals[
-        0
-    ].every == timedelta(minutes=10)
-    assert by_id[REFRESH_EXCHANGEINFO_SCHEDULE_ID].schedule.spec.cron_expressions == [
-        "10 3 * * *"
-    ]
+    assert set(by_id) == expected_ids
+
+    # Maintenance schedules
+    assert by_id[RECONCILE_KLINES_SCHEDULE_ID].schedule.spec.intervals[0].every == timedelta(minutes=30)
+    assert by_id[RECONCILE_ORDERS_SCHEDULE_ID].schedule.spec.intervals[0].every == timedelta(minutes=10)
+    assert by_id[REFRESH_EXCHANGEINFO_SCHEDULE_ID].schedule.spec.cron_expressions == ["10 3 * * *"]
+    assert by_id[CHECK_KLINE_FRESHNESS_SCHEDULE_ID].schedule.spec.intervals[0].every == timedelta(minutes=1)
+
+    # Per-shard schedules — verify tick intervals match config
+    candles_tick = timedelta(seconds=cfg.schedules.candles_tick_sec)
+    positions_tick = timedelta(seconds=cfg.schedules.positions_tick_sec)
+    for i in range(shard_count):
+        assert by_id[f"{PROCESS_CANDLES_SCHEDULE_PREFIX}-{i}"].schedule.spec.intervals[0].every == candles_tick
+        assert by_id[f"{MANAGE_POSITIONS_SCHEDULE_PREFIX}-{i}"].schedule.spec.intervals[0].every == positions_tick
 
 
 def test_build_schedule_definitions_rejects_invalid_daily_format():
@@ -88,13 +101,15 @@ def test_build_schedule_definitions_rejects_invalid_daily_format():
 
 
 def test_schedule_bootstrap_is_idempotent_with_existing_schedules():
+    cfg = _app_config()
+    total = 4 + cfg.sharding.shard_count * 2  # 4 maintenance + 2 per shard
     client = _FakeScheduleClient(existing_schedule_ids={RECONCILE_ORDERS_SCHEDULE_ID})
 
     async def _case():
         bootstrap = ScheduleBootstrap(client, task_queue="tradebot")
-        result = await bootstrap.bootstrap(_app_config())
-        assert result == {"created": 2, "updated": 1, "total": 3}
-        assert len(client.created_ids) == 3
+        result = await bootstrap.bootstrap(cfg)
+        assert result == {"created": total - 1, "updated": 1, "total": total}
+        assert len(client.created_ids) == total
         assert RECONCILE_ORDERS_SCHEDULE_ID in client.handles
         assert len(client.handles[RECONCILE_ORDERS_SCHEDULE_ID].updates) == 1
         assert isinstance(
@@ -105,14 +120,16 @@ def test_schedule_bootstrap_is_idempotent_with_existing_schedules():
 
 
 def test_schedule_bootstrap_handles_schedule_already_running_error():
+    cfg = _app_config()
+    total = 4 + cfg.sharding.shard_count * 2
     client = _FakeScheduleClient(
         already_running_schedule_ids={RECONCILE_KLINES_SCHEDULE_ID}
     )
 
     async def _case():
         bootstrap = ScheduleBootstrap(client, task_queue="tradebot")
-        result = await bootstrap.bootstrap(_app_config())
-        assert result == {"created": 2, "updated": 1, "total": 3}
+        result = await bootstrap.bootstrap(cfg)
+        assert result == {"created": total - 1, "updated": 1, "total": total}
         assert RECONCILE_KLINES_SCHEDULE_ID in client.handles
         assert len(client.handles[RECONCILE_KLINES_SCHEDULE_ID].updates) == 1
 

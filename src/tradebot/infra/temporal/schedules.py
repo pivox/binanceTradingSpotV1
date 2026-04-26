@@ -20,6 +20,10 @@ from tradebot.config.types import AppConfig
 RECONCILE_KLINES_SCHEDULE_ID = "tradebot-reconcile-klines"
 RECONCILE_ORDERS_SCHEDULE_ID = "tradebot-reconcile-orders"
 REFRESH_EXCHANGEINFO_SCHEDULE_ID = "tradebot-refresh-exchangeinfo"
+PROCESS_CANDLES_SCHEDULE_PREFIX = "tradebot-process-candles-shard"
+MANAGE_POSITIONS_SCHEDULE_PREFIX = "tradebot-manage-positions-shard"
+CHECK_KLINE_FRESHNESS_SCHEDULE_ID = "tradebot-check-kline-freshness"
+
 _DAILY_HHMM_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -54,7 +58,11 @@ def _build_schedule_definitions(
     if app_config.schedules.reconcile_orders_min <= 0:
         raise ValueError("reconcile_orders_min must be > 0")
 
-    return [
+    shard_count = app_config.sharding.shard_count
+    candles_tick = timedelta(seconds=app_config.schedules.candles_tick_sec)
+    positions_tick = timedelta(seconds=app_config.schedules.positions_tick_sec)
+
+    definitions: list[ScheduleDefinition] = [
         ScheduleDefinition(
             schedule_id=RECONCILE_KLINES_SCHEDULE_ID,
             schedule=Schedule(
@@ -66,9 +74,7 @@ def _build_schedule_definitions(
                 spec=ScheduleSpec(
                     intervals=[
                         ScheduleIntervalSpec(
-                            every=timedelta(
-                                minutes=app_config.schedules.reconcile_klines_min
-                            )
+                            every=timedelta(minutes=app_config.schedules.reconcile_klines_min)
                         )
                     ]
                 ),
@@ -85,9 +91,7 @@ def _build_schedule_definitions(
                 spec=ScheduleSpec(
                     intervals=[
                         ScheduleIntervalSpec(
-                            every=timedelta(
-                                minutes=app_config.schedules.reconcile_orders_min
-                            )
+                            every=timedelta(minutes=app_config.schedules.reconcile_orders_min)
                         )
                     ]
                 ),
@@ -102,13 +106,67 @@ def _build_schedule_definitions(
                     task_queue=task_queue,
                 ),
                 spec=ScheduleSpec(
-                    cron_expressions=[
-                        _daily_hhmm_to_cron(app_config.schedules.exchangeinfo_daily)
-                    ]
+                    cron_expressions=[_daily_hhmm_to_cron(app_config.schedules.exchangeinfo_daily)]
                 ),
             ),
         ),
     ]
+
+    definitions.append(
+        ScheduleDefinition(
+            schedule_id=CHECK_KLINE_FRESHNESS_SCHEDULE_ID,
+            schedule=Schedule(
+                action=ScheduleActionStartWorkflow(
+                    "CheckKlineFreshnessWorkflow",
+                    id=f"{CHECK_KLINE_FRESHNESS_SCHEDULE_ID}-workflow",
+                    task_queue=task_queue,
+                ),
+                spec=ScheduleSpec(
+                    intervals=[ScheduleIntervalSpec(every=timedelta(minutes=1))]
+                ),
+            ),
+        )
+    )
+
+    # One schedule per shard for the two high-frequency trading workflows.
+    for shard_id in range(shard_count):
+        candles_id = f"{PROCESS_CANDLES_SCHEDULE_PREFIX}-{shard_id}"
+        definitions.append(
+            ScheduleDefinition(
+                schedule_id=candles_id,
+                schedule=Schedule(
+                    action=ScheduleActionStartWorkflow(
+                        "ProcessClosedCandlesWorkflow",
+                        args=[shard_id, shard_count],
+                        id=f"{candles_id}-workflow",
+                        task_queue=task_queue,
+                    ),
+                    spec=ScheduleSpec(
+                        intervals=[ScheduleIntervalSpec(every=candles_tick)]
+                    ),
+                ),
+            )
+        )
+
+        positions_id = f"{MANAGE_POSITIONS_SCHEDULE_PREFIX}-{shard_id}"
+        definitions.append(
+            ScheduleDefinition(
+                schedule_id=positions_id,
+                schedule=Schedule(
+                    action=ScheduleActionStartWorkflow(
+                        "ManageOpenPositionsWorkflow",
+                        args=[shard_id],
+                        id=f"{positions_id}-workflow",
+                        task_queue=task_queue,
+                    ),
+                    spec=ScheduleSpec(
+                        intervals=[ScheduleIntervalSpec(every=positions_tick)]
+                    ),
+                ),
+            )
+        )
+
+    return definitions
 
 
 class ScheduleBootstrap:

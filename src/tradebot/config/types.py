@@ -26,6 +26,7 @@ class StrategyConfig:
     max_open_positions: int
     per_trade_quote_budget: float
     exit_plan: ExitPlanConfig
+    daily_loss_limit_usdc: float = -50.0
 
 
 @dataclass(frozen=True)

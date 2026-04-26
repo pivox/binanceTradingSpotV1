@@ -63,6 +63,7 @@ def build_worker(client: Client) -> Worker:
             act.fetch_historical_klines,
             act.reconcile_orders,
             act.refresh_exchange_info,
+            act.get_daily_realized_pnl,
         ],
     )
 

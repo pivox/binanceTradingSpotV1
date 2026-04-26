@@ -159,6 +159,22 @@ CREATE INDEX IF NOT EXISTS ix_order_intents_symbol_status
 CREATE INDEX IF NOT EXISTS ix_order_intents_position
   ON order_intents(position_id);
 
+CREATE TABLE IF NOT EXISTS pnl_trades (
+  id              BIGSERIAL     PRIMARY KEY,
+  position_id     TEXT          NOT NULL UNIQUE,
+  symbol          TEXT          NOT NULL,
+  opened_at_ms    BIGINT        NOT NULL,
+  closed_at_ms    BIGINT        NOT NULL,
+  entry_price     NUMERIC(20,8) NOT NULL,
+  exit_price_avg  NUMERIC(20,8) NOT NULL,
+  quantity_total  NUMERIC(20,8) NOT NULL,
+  realized_pnl    NUMERIC(20,8) NOT NULL,
+  created_at      TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_pnl_trades_closed_at
+  ON pnl_trades(closed_at_ms);
+
 CREATE TABLE IF NOT EXISTS mtf_states (
   symbol              TEXT    PRIMARY KEY,
   regime              TEXT    NOT NULL,

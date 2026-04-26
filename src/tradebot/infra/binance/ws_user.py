@@ -8,6 +8,7 @@ from typing import Any, Optional, TYPE_CHECKING
 import aiohttp
 import structlog
 import websockets
+from decimal import Decimal, InvalidOperation
 
 if TYPE_CHECKING:
     from temporalio.client import Client as TemporalClient
@@ -56,6 +57,19 @@ UPDATE positions
 SET status = 'CLOSED', closed_at_ms = $1
 WHERE id = $2
   AND status NOT IN ('CLOSED')
+"""
+
+_GET_POSITION_FOR_PNL_SQL = """
+SELECT entry_price, opened_at_ms, quantity_total FROM positions WHERE id = $1
+"""
+
+_INSERT_PNL_SQL = """
+INSERT INTO pnl_trades (
+    position_id, symbol, opened_at_ms, closed_at_ms,
+    entry_price, exit_price_avg, quantity_total, realized_pnl
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (position_id) DO NOTHING
 """
 
 # Binance executionReport X field → DB status
@@ -251,12 +265,55 @@ class BinanceWsUser:
                                     self._cancel_binance_order(symbol, int(sl_order_id)),
                                     name=f"cancel-sl-{pos_id}",
                                 )
+                            await self._record_trade_pnl(conn, pos_id, symbol, exit_plan, now_ms)
                     except Exception as exc:
                         log.warning(
                             "user_stream_exit_plan_update_failed",
                             position_id=pos_id,
                             error=str(exc),
                         )
+
+    async def _record_trade_pnl(
+        self, conn, pos_id: str, symbol: str, exit_plan: dict, closed_at_ms: int
+    ) -> None:
+        """Insert a pnl_trades row when all lots of a position are filled."""
+        try:
+            pos_row = await conn.fetchrow(_GET_POSITION_FOR_PNL_SQL, pos_id)
+            if pos_row is None:
+                return
+            entry_price = Decimal(str(pos_row["entry_price"]))
+            opened_at_ms = int(pos_row["opened_at_ms"])
+
+            total_value = Decimal("0")
+            total_qty = Decimal("0")
+            for lot in exit_plan.get("lots", []):
+                try:
+                    fp = Decimal(str(lot["fill_price"]))
+                    qty = Decimal(str(lot["quantity"]))
+                    total_value += fp * qty
+                    total_qty += qty
+                except (InvalidOperation, KeyError, TypeError):
+                    continue
+
+            if total_qty == Decimal("0"):
+                return
+
+            exit_price_avg = total_value / total_qty
+            realized_pnl = (exit_price_avg - entry_price) * total_qty
+
+            await conn.execute(
+                _INSERT_PNL_SQL,
+                pos_id, symbol, opened_at_ms, closed_at_ms,
+                str(entry_price), str(exit_price_avg), str(total_qty), str(realized_pnl),
+            )
+            log.info(
+                "user_stream_pnl_recorded",
+                position_id=pos_id,
+                symbol=symbol,
+                realized_pnl=str(realized_pnl),
+            )
+        except Exception as exc:
+            log.warning("user_stream_pnl_record_failed", position_id=pos_id, error=str(exc))
 
     async def _start_post_fill_workflow(self, position_id: str) -> None:
         """F-002: launch PostFillSetupWorkflow after BUY fill."""

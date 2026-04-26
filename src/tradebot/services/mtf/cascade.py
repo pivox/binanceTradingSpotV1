@@ -201,6 +201,7 @@ def evaluate_cascade(
     quality = (
         SignalQuality.HIGH if score >= 0.75
         else SignalQuality.MEDIUM if score >= 0.60
+        else SignalQuality.LOW if score >= 0.50
         else SignalQuality.REJECTED
     )
     cascade_passed = quality in (SignalQuality.HIGH, SignalQuality.MEDIUM)

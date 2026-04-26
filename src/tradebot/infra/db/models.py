@@ -223,6 +223,24 @@ class MtfState(Base):
     )
 
 
+class PnlTrade(Base):
+    __tablename__ = "pnl_trades"
+    __table_args__ = (
+        Index("ix_pnl_trades_closed_at", "closed_at_ms"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    position_id = Column(String(36), nullable=False, unique=True)
+    symbol = Column(String(20), nullable=False)
+    opened_at_ms = Column(BigInteger, nullable=False)
+    closed_at_ms = Column(BigInteger, nullable=False)
+    entry_price = Column(Numeric(20, 8), nullable=False)
+    exit_price_avg = Column(Numeric(20, 8), nullable=False)
+    quantity_total = Column(Numeric(20, 8), nullable=False)
+    realized_pnl = Column(Numeric(20, 8), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
 class ExchangeInfoCache(Base):
     __tablename__ = "exchange_info_cache"
 

@@ -879,24 +879,21 @@ async def create_buy_intent(symbol: str, open_time_ms: int) -> OrderIntent:
         snapshot_5m: dict = dict(snap_5m_row.payload_json) if snap_5m_row else {}
 
         open_count = PositionRepoSql(session).count_open()
+        daily_pnl_raw = session.scalar(
+            text("SELECT COALESCE(SUM(realized_pnl), 0) FROM pnl_trades WHERE closed_at_ms >= :ts"),
+            {"ts": _today_start_ms()},
+        )
 
     app_config = load_app_config(get_app_config_path())
     strategy = app_config.strategy
     if open_count >= strategy.max_open_positions:
         raise RuntimeError(f"max_open_positions={strategy.max_open_positions} reached")
 
-    if strategy.daily_loss_limit_usdc < 0:
-        today_ms = _today_start_ms()
-        with session_factory() as session:
-            daily_pnl = session.scalar(
-                text("SELECT COALESCE(SUM(realized_pnl), 0) FROM pnl_trades WHERE closed_at_ms >= :ts"),
-                {"ts": today_ms},
-            )
-        if float(daily_pnl or 0) <= strategy.daily_loss_limit_usdc:
-            raise RuntimeError(
-                f"daily_loss_limit reached: pnl={float(daily_pnl or 0):.2f} USDC "
-                f"(limit={strategy.daily_loss_limit_usdc})"
-            )
+    if strategy.daily_loss_limit_usdc < 0 and float(daily_pnl_raw or 0) <= strategy.daily_loss_limit_usdc:
+        raise RuntimeError(
+            f"daily_loss_limit reached: pnl={float(daily_pnl_raw or 0):.2f} USDC "
+            f"(limit={strategy.daily_loss_limit_usdc})"
+        )
 
     cascade_obj = DomainCascadeResult(
         symbol=symbol,
@@ -1124,9 +1121,7 @@ async def place_order(intent: OrderIntent) -> dict[str, Any]:
 
     # Live: call Binance REST
     client = BinanceRestClient(
-        api_key=settings.binance_api_key,
-        api_secret=settings.binance_api_secret,
-        base_url=settings.binance_rest_url,
+        settings,
     )
     try:
         resp = await client.place_order(
@@ -1168,9 +1163,7 @@ async def cancel_order(symbol: str, order_id: str) -> dict[str, Any]:
 
     settings = Settings()
     client = BinanceRestClient(
-        api_key=settings.binance_api_key,
-        api_secret=settings.binance_api_secret,
-        base_url=settings.binance_rest_url,
+        settings,
     )
     try:
         binance_id = int(order_id) if order_id.isdigit() else None
@@ -1211,9 +1204,7 @@ async def place_protection_orders(position_id: str) -> dict[str, Any]:
         return {"ok": True, "mode": mode, "simulated": True}
 
     client = BinanceRestClient(
-        api_key=settings.binance_api_key,
-        api_secret=settings.binance_api_secret,
-        base_url=settings.binance_rest_url,
+        settings,
     )
     try:
         sl_resp = await client.place_order(
@@ -1288,9 +1279,7 @@ async def update_stop_loss(position_id: str, new_sl: str, symbol: str) -> dict[s
 
     old_sl_order_id = plan_dict.get("sl_order_id")
     client = BinanceRestClient(
-        api_key=settings.binance_api_key,
-        api_secret=settings.binance_api_secret,
-        base_url=settings.binance_rest_url,
+        settings,
     )
     try:
         if old_sl_order_id:
@@ -1642,9 +1631,7 @@ async def reconcile_orders() -> dict[str, Any]:
         return {"ok": True, "fixed": fixed, "mode": mode}
 
     client = BinanceRestClient(
-        api_key=settings.binance_api_key,
-        api_secret=settings.binance_api_secret,
-        base_url=settings.binance_rest_url,
+        settings,
     )
     try:
         for intent in active_intents:

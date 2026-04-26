@@ -5,7 +5,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from temporalio import activity
 from typing import Any, Optional
@@ -145,6 +145,12 @@ def _backfill_policy_from_settings(settings: Settings) -> BackfillRetryPolicy:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _today_start_ms() -> int:
+    """Milliseconds timestamp for UTC midnight of the current calendar day."""
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(today.timestamp() * 1000)
 
 
 def _normalize_gap_request_window(
@@ -878,6 +884,19 @@ async def create_buy_intent(symbol: str, open_time_ms: int) -> OrderIntent:
     strategy = app_config.strategy
     if open_count >= strategy.max_open_positions:
         raise RuntimeError(f"max_open_positions={strategy.max_open_positions} reached")
+
+    if strategy.daily_loss_limit_usdc < 0:
+        today_ms = _today_start_ms()
+        with session_factory() as session:
+            daily_pnl = session.scalar(
+                text("SELECT COALESCE(SUM(realized_pnl), 0) FROM pnl_trades WHERE closed_at_ms >= :ts"),
+                {"ts": today_ms},
+            )
+        if float(daily_pnl or 0) <= strategy.daily_loss_limit_usdc:
+            raise RuntimeError(
+                f"daily_loss_limit reached: pnl={float(daily_pnl or 0):.2f} USDC "
+                f"(limit={strategy.daily_loss_limit_usdc})"
+            )
 
     cascade_obj = DomainCascadeResult(
         symbol=symbol,
@@ -1911,6 +1930,39 @@ async def ensure_indicator_warmup(
                   symbol=symbol, timeframe=timeframe, inserted=inserted, was_count=count)
     return {"symbol": symbol, "timeframe": timeframe,
             "already_sufficient": False, "inserted": inserted}
+
+
+@activity.defn(name="get_daily_realized_pnl")
+async def get_daily_realized_pnl() -> dict[str, Any]:
+    """
+    Returns today's realized PnL in USDC and a per-symbol breakdown.
+    Used for observability and the daily loss circuit breaker.
+    """
+    settings = Settings()
+    session_factory = create_session_factory(settings)
+    today_ms = _today_start_ms()
+
+    with session_factory() as session:
+        total = session.scalar(
+            text("SELECT COALESCE(SUM(realized_pnl), 0) FROM pnl_trades WHERE closed_at_ms >= :ts"),
+            {"ts": today_ms},
+        )
+        rows = session.execute(
+            text(
+                "SELECT symbol, SUM(realized_pnl) AS pnl "
+                "FROM pnl_trades WHERE closed_at_ms >= :ts "
+                "GROUP BY symbol ORDER BY symbol"
+            ),
+            {"ts": today_ms},
+        ).fetchall()
+
+    by_symbol = {str(r[0]): float(r[1]) for r in rows}
+    return {
+        "today_start_ms": today_ms,
+        "total_pnl_usdc": float(total or 0),
+        "by_symbol": by_symbol,
+        "trades": len(rows),
+    }
 
 
 @activity.defn(name="fetch_historical_klines")

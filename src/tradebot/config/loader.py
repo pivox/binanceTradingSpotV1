@@ -36,6 +36,7 @@ def load_app_config(path: Path) -> AppConfig:
         max_open_positions=int(raw["strategy"]["max_open_positions"]),
         per_trade_quote_budget=float(raw["strategy"]["per_trade_quote_budget"]),
         exit_plan=ExitPlanConfig(lots=lots),
+        daily_loss_limit_usdc=float(raw["strategy"].get("daily_loss_limit_usdc", -50.0)),
     )
 
     schedules = SchedulesConfig(

@@ -185,14 +185,19 @@ class BinanceWsUser:
         binance_status = str(msg.get("X", "")).upper()
         side = str(msg.get("S", "")).upper()
         cum_qty = str(msg.get("z", "0"))
-        # avg fill price: "ap" field or last executed price "L"
-        avg_price = str(msg.get("ap") or msg.get("L") or "0")
+        # Correct weighted avg price for Spot: cumulative quote (Z) / cumulative base (z)
+        try:
+            _cq = Decimal(cum_qty)
+            avg_price = str(Decimal(str(msg.get("Z", "0"))) / _cq) if _cq > 0 else "0"
+        except (InvalidOperation, ZeroDivisionError):
+            avg_price = "0"
 
         db_status = _STATUS_MAP.get(binance_status)
         if db_status is None:
             return
 
-        now_ms = int(time.time() * 1000)
+        # Use Binance transaction time for consistency with exchange state
+        now_ms = int(msg.get("T") or time.time() * 1000)
         intent_key = client_order_id
 
         async with self._pool.acquire() as conn:
@@ -206,12 +211,14 @@ class BinanceWsUser:
                     now_ms,
                     intent_key,
                 )
+                if updated == "UPDATE 0":
+                    return
+
                 log.info(
                     "user_stream_order_update",
                     symbol=symbol,
                     intent_key=intent_key,
                     status=db_status,
-                    rows=updated,
                 )
 
                 if db_status != "FILLED":
@@ -331,26 +338,23 @@ class BinanceWsUser:
 
     async def _cancel_binance_order(self, symbol: str, order_id: int) -> None:
         """F-005: cancel the SL order when all lots are filled."""
+        from tradebot.infra.binance.rest import BinanceRestClient
+        client = BinanceRestClient(
+            api_key=self._api_key,
+            api_secret=self._api_secret,
+            base_url=self._rest_url,
+        )
         try:
-            from tradebot.infra.binance._signing import add_auth_params
-            params: dict = {"symbol": symbol, "orderId": order_id}
-            add_auth_params(params, self._api_secret)
-            headers = {"X-MBX-APIKEY": self._api_key}
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.delete(
-                    f"{self._rest_url}/api/v3/order",
-                    params=params,
-                    headers=headers,
-                ) as resp:
-                    if resp.status not in (200, 204, 400):  # 400 may be -2011 (already gone)
-                        body = (await resp.text())[:200]
-                        log.warning("user_stream_cancel_sl_failed", symbol=symbol,
-                                    order_id=order_id, status=resp.status, body=body)
-                    else:
-                        log.info("user_stream_sl_cancelled", symbol=symbol, order_id=order_id)
+            await client.cancel_order(symbol=symbol, order_id=order_id)
+            log.info("user_stream_sl_cancelled", symbol=symbol, order_id=order_id)
         except Exception as exc:
-            log.warning("user_stream_cancel_sl_error", symbol=symbol,
-                        order_id=order_id, error=str(exc))
+            if "-2011" in str(exc):
+                log.info("user_stream_sl_already_gone", symbol=symbol, order_id=order_id)
+            else:
+                log.warning("user_stream_cancel_sl_error", symbol=symbol,
+                            order_id=order_id, error=str(exc))
+        finally:
+            await client.close()
 
     async def _handle_message(self, msg: dict) -> None:
         event_type = str(msg.get("e", ""))

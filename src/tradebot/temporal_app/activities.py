@@ -879,24 +879,21 @@ async def create_buy_intent(symbol: str, open_time_ms: int) -> OrderIntent:
         snapshot_5m: dict = dict(snap_5m_row.payload_json) if snap_5m_row else {}
 
         open_count = PositionRepoSql(session).count_open()
+        daily_pnl_raw = session.scalar(
+            text("SELECT COALESCE(SUM(realized_pnl), 0) FROM pnl_trades WHERE closed_at_ms >= :ts"),
+            {"ts": _today_start_ms()},
+        )
 
     app_config = load_app_config(get_app_config_path())
     strategy = app_config.strategy
     if open_count >= strategy.max_open_positions:
         raise RuntimeError(f"max_open_positions={strategy.max_open_positions} reached")
 
-    if strategy.daily_loss_limit_usdc < 0:
-        today_ms = _today_start_ms()
-        with session_factory() as session:
-            daily_pnl = session.scalar(
-                text("SELECT COALESCE(SUM(realized_pnl), 0) FROM pnl_trades WHERE closed_at_ms >= :ts"),
-                {"ts": today_ms},
-            )
-        if float(daily_pnl or 0) <= strategy.daily_loss_limit_usdc:
-            raise RuntimeError(
-                f"daily_loss_limit reached: pnl={float(daily_pnl or 0):.2f} USDC "
-                f"(limit={strategy.daily_loss_limit_usdc})"
-            )
+    if strategy.daily_loss_limit_usdc < 0 and float(daily_pnl_raw or 0) <= strategy.daily_loss_limit_usdc:
+        raise RuntimeError(
+            f"daily_loss_limit reached: pnl={float(daily_pnl_raw or 0):.2f} USDC "
+            f"(limit={strategy.daily_loss_limit_usdc})"
+        )
 
     cascade_obj = DomainCascadeResult(
         symbol=symbol,

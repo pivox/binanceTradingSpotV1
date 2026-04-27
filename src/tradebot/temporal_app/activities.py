@@ -625,12 +625,18 @@ async def compute_indicator_snapshot(
     )
 
     computed_at = _now_ms()
-    payload = build_indicator_snapshot(
-        symbol=symbol,
-        timeframe=timeframe,
-        candles=candles,
-        computed_at=computed_at,
-    )
+    try:
+        payload = build_indicator_snapshot(
+            symbol=symbol,
+            timeframe=timeframe,
+            candles=candles,
+            computed_at=computed_at,
+        )
+    except ValueError as exc:
+        _activity_log("warning", "compute_indicator_snapshot_skipped",
+                      symbol=symbol, timeframe=timeframe, reason=str(exc))
+        return IndicatorSnapshot(symbol=symbol, timeframe=timeframe,
+                                 open_time_ms=open_time_ms, payload={})
     # close_price is needed by condition helpers
     payload["close_price"] = candles[-1].close
 

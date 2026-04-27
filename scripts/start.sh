@@ -51,11 +51,26 @@ done
 echo "[start.sh] Waiting for Temporal ($TEMPORAL_ADDRESS)..."
 for i in $(seq 1 30); do
   if bash -c ">/dev/tcp/$TEMPORAL_HOST/$TEMPORAL_PORT" 2>/dev/null; then
-    echo "[start.sh] Temporal ready."
+    echo "[start.sh] Temporal TCP ready."
     break
   fi
   if [[ $i -eq 30 ]]; then
     echo "[start.sh] ERROR: Temporal did not become ready in time." >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+# Wait for the default namespace to be registered (auto-setup takes a few seconds after TCP)
+echo "[start.sh] Waiting for Temporal namespace 'default'..."
+for i in $(seq 1 30); do
+  if docker compose -f "$ROOT/docker-compose.yml" exec -T temporal \
+       temporal operator namespace describe default >/dev/null 2>&1; then
+    echo "[start.sh] Temporal namespace ready."
+    break
+  fi
+  if [[ $i -eq 30 ]]; then
+    echo "[start.sh] ERROR: Temporal namespace 'default' did not become ready in time." >&2
     exit 1
   fi
   sleep 2
@@ -66,28 +81,28 @@ echo "[start.sh] Starting ws_candle_daemon..."
 poetry -C "$ROOT" run python "$ROOT/ws_candle_daemon.py" \
   >"$LOGS_DIR/daemon.log" 2>&1 &
 PIDS+=($!)
-echo "[start.sh] ws_candle_daemon PID=${PIDS[-1]}  →  logs/daemon.log"
+echo "[start.sh] ws_candle_daemon PID=$!  →  logs/daemon.log"
 
 # ── 5. Temporal worker (bootstraps schedules automatically) ──────────────────
 echo "[start.sh] Starting temporal_worker..."
 poetry -C "$ROOT" run python -m tradebot.apps.temporal_worker_main \
   >"$LOGS_DIR/worker.log" 2>&1 &
 PIDS+=($!)
-echo "[start.sh] temporal_worker   PID=${PIDS[-1]}  →  logs/worker.log"
+echo "[start.sh] temporal_worker   PID=$!  →  logs/worker.log"
 
 # ── 6. Daemon API ────────────────────────────────────────────────────────────
 echo "[start.sh] Starting daemon_api..."
 poetry -C "$ROOT" run python -m tradebot.apps.daemon_api_main \
   >"$LOGS_DIR/api.log" 2>&1 &
 PIDS+=($!)
-echo "[start.sh] daemon_api        PID=${PIDS[-1]}  →  logs/api.log"
+echo "[start.sh] daemon_api        PID=$!  →  logs/api.log"
 
 # ── 7. User data stream (Binance executionReport) ────────────────────────────
 echo "[start.sh] Starting user_stream..."
 poetry -C "$ROOT" run python -m tradebot.apps.user_stream_main \
   >"$LOGS_DIR/user_stream.log" 2>&1 &
 PIDS+=($!)
-echo "[start.sh] user_stream       PID=${PIDS[-1]}  →  logs/user_stream.log"
+echo "[start.sh] user_stream       PID=$!  →  logs/user_stream.log"
 
 echo ""
 echo "[start.sh] All processes running. Press Ctrl+C to stop."

@@ -28,6 +28,7 @@ class ConsumeCandleEventsWorkflow:
             args=[shard_id, shard_count, batch_limit],
             start_to_close_timeout=AIO_TIMEOUT,
             retry_policy=DEFAULT_RETRY,
+            result_type=list[CandleCloseEvent],
         )
 
         processed = 0
@@ -187,6 +188,7 @@ class ManageOpenPositionsWorkflow:
             args=[shard_id, max_positions],
             start_to_close_timeout=AIO_TIMEOUT,
             retry_policy=DEFAULT_RETRY,
+            result_type=list[Position],
         )
 
         acted = 0

@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS indicator_snapshots (
   etag           TEXT        NOT NULL,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(symbol, timeframe, close_time_ms)
+  CONSTRAINT uq_indicator_snapshots_symbol_tf_close_time UNIQUE(symbol, timeframe, close_time_ms)
 );
 
 CREATE TABLE IF NOT EXISTS backfill_jobs (

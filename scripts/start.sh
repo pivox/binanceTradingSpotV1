@@ -20,10 +20,12 @@ PIDS=()
 cleanup() {
   echo ""
   echo "[start.sh] Shutting down..."
-  for pid in "${PIDS[@]}"; do
-    kill "$pid" 2>/dev/null || true
-  done
-  wait 2>/dev/null || true
+  if [[ ${#PIDS[@]} -gt 0 ]]; then
+    for pid in "${PIDS[@]}"; do
+      kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
+  fi
   echo "[start.sh] Done."
 }
 trap cleanup SIGINT SIGTERM EXIT
@@ -62,10 +64,14 @@ for i in $(seq 1 30); do
 done
 
 # Wait for the default namespace to be registered (auto-setup takes a few seconds after TCP)
+# Temporal listens on the Docker bridge IP, not 127.0.0.1 — retrieve it dynamically.
 echo "[start.sh] Waiting for Temporal namespace 'default'..."
+TEMPORAL_CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
+  "$(docker compose -f "$ROOT/docker-compose.yml" ps -q temporal)" 2>/dev/null | head -1)
 for i in $(seq 1 30); do
   if docker compose -f "$ROOT/docker-compose.yml" exec -T temporal \
-       temporal operator namespace describe default >/dev/null 2>&1; then
+       temporal operator namespace describe -n default \
+       --address "${TEMPORAL_CONTAINER_IP}:7233" >/dev/null 2>&1; then
     echo "[start.sh] Temporal namespace ready."
     break
   fi

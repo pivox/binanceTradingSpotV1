@@ -647,15 +647,18 @@ async function loadOlderCandles() {
   const all = getChartData();
   if (!all.length) return;
 
+  const symbol = state.symbol;
+  const timeframe = state.timeframe;
   state.historyLoading = true;
   const firstOpenTimeMs = all[0].open_time_ms;
   const url =
-    "/chart/candles?symbol=" + encodeURIComponent(state.symbol) +
-    "&timeframe=" + encodeURIComponent(state.timeframe) +
+    "/chart/candles?symbol=" + encodeURIComponent(symbol) +
+    "&timeframe=" + encodeURIComponent(timeframe) +
     "&before_open_time_ms=" + encodeURIComponent(firstOpenTimeMs) +
     "&limit=" + DEFAULT_LIMIT;
   try {
     const rows = await fetchPayload(url);
+    if (state.symbol !== symbol || state.timeframe !== timeframe) return;
     const older = toCandleList(rows);
     if (older.length === 0) {
       state.historyExhausted = true;
@@ -664,7 +667,7 @@ async function loadOlderCandles() {
     state.olderCandles = [...older, ...state.olderCandles];
     chart.viewStart += older.length;
     chart.setData(getChartData());
-    void reportGapsIfNeeded(getChartData());
+    void reportGapsIfNeeded(getChartData().slice(0, older.length + 1));
   } catch (error) {
     if (error?.name !== "AbortError") {
       console.error("load_older_candles_error", error);

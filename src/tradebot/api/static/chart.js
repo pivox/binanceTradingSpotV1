@@ -61,6 +61,9 @@ const state = {
   indicatorLastFetchedAtMs: 0,
   indicatorBootstrapTimerId: null,
   indicatorRequestInFlight: false,
+  olderCandles: [],
+  historyLoading: false,
+  historyExhausted: false,
 };
 
 let chart = null;
@@ -583,6 +586,94 @@ function getLastOpenTimeMs(candles) {
   return candles[candles.length - 1].open_time_ms;
 }
 
+function getChartData() {
+  if (!state.olderCandles.length) return state.candles;
+  return [...state.olderCandles, ...state.candles];
+}
+
+function resetHistoricalState() {
+  state.olderCandles = [];
+  state.historyLoading = false;
+  state.historyExhausted = false;
+}
+
+function timeframeToMs(timeframe) {
+  const match = String(timeframe || "").match(/^([1-9][0-9]*)([mhdwM])$/);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = match[2];
+  const factors = { m: 60000, h: 3600000, d: 86400000, w: 604800000, M: 2592000000 };
+  return amount * (factors[unit] ?? 60000);
+}
+
+function detectGaps(candles, timeframe) {
+  const intervalMs = timeframeToMs(timeframe);
+  if (!intervalMs || candles.length < 2) return [];
+  const gaps = [];
+  for (let i = 1; i < candles.length; i++) {
+    const expected = candles[i - 1].open_time_ms + intervalMs;
+    if (candles[i].open_time_ms > expected + intervalMs * 0.5) {
+      gaps.push({
+        from_open_time_ms: candles[i - 1].open_time_ms,
+        to_open_time_ms: candles[i].open_time_ms,
+      });
+    }
+  }
+  return gaps;
+}
+
+async function reportGapsIfNeeded(candles) {
+  if (!state.symbol || !candles?.length) return;
+  const gaps = detectGaps(candles, state.timeframe);
+  for (const gap of gaps) {
+    try {
+      await fetch("/chart/gap-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: state.symbol,
+          from_open_time_ms: gap.from_open_time_ms,
+          to_open_time_ms: gap.to_open_time_ms,
+        }),
+      });
+    } catch (_) {}
+  }
+}
+
+async function loadOlderCandles() {
+  if (state.historyLoading || state.historyExhausted || !state.symbol || !state.timeframe) {
+    return;
+  }
+  const all = getChartData();
+  if (!all.length) return;
+
+  state.historyLoading = true;
+  const firstOpenTimeMs = all[0].open_time_ms;
+  const url =
+    "/chart/candles?symbol=" + encodeURIComponent(state.symbol) +
+    "&timeframe=" + encodeURIComponent(state.timeframe) +
+    "&before_open_time_ms=" + encodeURIComponent(firstOpenTimeMs) +
+    "&limit=" + DEFAULT_LIMIT;
+  try {
+    const rows = await fetchPayload(url);
+    const older = toCandleList(rows);
+    if (older.length === 0) {
+      state.historyExhausted = true;
+      return;
+    }
+    state.olderCandles = [...older, ...state.olderCandles];
+    chart.viewStart += older.length;
+    chart.setData(getChartData());
+    void reportGapsIfNeeded(getChartData());
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      console.error("load_older_candles_error", error);
+    }
+  } finally {
+    state.historyLoading = false;
+  }
+}
+
 function mergeCandles(existing, incoming) {
   if (!incoming.length) {
     return existing.slice(-MAX_RENDER_CANDLES);
@@ -658,7 +749,7 @@ function scheduleLiveTick(generation, delayMs) {
 }
 
 function refreshChartFromState({ showEmptyOverlay = true } = {}) {
-  const candles = state.candles;
+  const candles = getChartData();
   updateMeta(state.symbol, state.timeframe, candles);
   if (candles.length === 0) {
     chart.setData([]);
@@ -682,6 +773,7 @@ async function fullReloadCurrentSelectionWithoutOverlay() {
       state.timeframe,
       state.liveAbortController?.signal
     );
+    resetHistoricalState();
     state.candles = candles;
     refreshChartFromState({ showEmptyOverlay: true });
     void refreshIndicators({ reason: "live" });
@@ -796,6 +888,7 @@ class CandleCanvasChart {
     this.isPanning = false;
     this.panStartX = 0;
     this.panStartViewStart = 0;
+    this.onLeftEdge = null;
     this.hostEl.appendChild(this.canvas);
     this.canvas.style.cursor = "crosshair";
 
@@ -968,6 +1061,9 @@ class CandleCanvasChart {
       const shift = Math.round((this.panStartX - point.x) / this.layout.step);
       this.viewStart = this.clampViewStart(this.panStartViewStart + shift);
       this.draw();
+      if (this.viewStart === 0 && this.onLeftEdge) {
+        this.onLeftEdge();
+      }
       return;
     }
 
@@ -1019,6 +1115,9 @@ class CandleCanvasChart {
     const nextStart = Math.round(anchorIndex - relative * (nextCount - 1));
     this.viewStart = this.clampViewStart(nextStart);
     this.draw();
+    if (this.viewStart === 0 && this.onLeftEdge) {
+      this.onLeftEdge();
+    }
   }
 
   draw() {
@@ -1598,6 +1697,7 @@ function movePairFocusAbsolute(position) {
 
 async function loadAndRenderCandles({ symbol, timeframe, showLoadingOverlay }) {
   stopLiveUpdater({ bumpGeneration: true });
+  resetHistoricalState();
 
   if (showLoadingOverlay) {
     showState("loading", "Chargement des chandeliers...");
@@ -1623,6 +1723,7 @@ async function loadAndRenderCandles({ symbol, timeframe, showLoadingOverlay }) {
     }
     state.candles = candles;
     refreshChartFromState({ showEmptyOverlay: true });
+    void reportGapsIfNeeded(state.candles);
     void refreshIndicators({ reason: "manual" });
     setTimeframeHint("Active: " + timeframe);
     setLiveUpdateNow();
@@ -1890,6 +1991,7 @@ async function resolveInitialSelection(preferredSymbol = "", preferredTimeframe 
 
 async function initChartPage() {
   chart = new CandleCanvasChart(chartHostEl);
+  chart.onLeftEdge = () => void loadOlderCandles();
   timeframeSwitchEl.addEventListener("keydown", handleTimeframeKeyboard);
   pairTriggerEl.addEventListener("click", () => {
     void openPairOverlay();
@@ -1941,6 +2043,7 @@ async function initChartPage() {
     }
 
     refreshChartFromState({ showEmptyOverlay: true });
+    void reportGapsIfNeeded(state.candles);
     void refreshIndicators({ reason: "manual" });
     setTimeframeHint("Active: " + state.timeframe);
     setLiveUpdateNow();

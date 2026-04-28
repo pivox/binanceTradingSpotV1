@@ -24,6 +24,7 @@ from tradebot.api.indicator_repository import (
 from tradebot.config.settings import Settings
 from tradebot.daemon.control import DaemonControlError, DaemonController
 from tradebot.infra.db.engine import create_session_factory
+from tradebot.infra.db.models import CandleGapRequest
 from tradebot.observability.logging import configure_logging
 from tradebot.observability.metrics import (
     INDICATOR_API_LATENCY_MS,
@@ -201,6 +202,24 @@ def _parse_from_open_time_ms(raw_value: str | None) -> tuple[int | None, str | N
 
     if parsed < 0:
         return None, "query param 'from_open_time_ms' must be a non-negative integer"
+    return parsed, None
+
+
+def _parse_before_open_time_ms(raw_value: str | None) -> tuple[int | None, str | None]:
+    if raw_value is None:
+        return None, None
+
+    value = raw_value.strip()
+    if not value:
+        return None, "query param 'before_open_time_ms' must be a non-negative integer"
+
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None, "query param 'before_open_time_ms' must be a non-negative integer"
+
+    if parsed < 0:
+        return None, "query param 'before_open_time_ms' must be a non-negative integer"
     return parsed, None
 
 
@@ -732,6 +751,14 @@ def create_app(settings: Settings) -> web.Application:
             _log_chart_latency(log, "/chart/candles", started_at, result=result)
             return _json_err("invalid_request", from_open_error, status=400)
 
+        before_open_time_ms, before_open_error = _parse_before_open_time_ms(
+            request.query.get("before_open_time_ms")
+        )
+        if before_open_error:
+            result = "invalid_request"
+            _log_chart_latency(log, "/chart/candles", started_at, result=result)
+            return _json_err("invalid_request", before_open_error, status=400)
+
         try:
             with _session_scope(request) as session:
                 candles = ChartRepository(session).fetch_candles(
@@ -739,6 +766,7 @@ def create_app(settings: Settings) -> web.Application:
                     timeframe=timeframe,
                     limit=limit or CHART_DEFAULT_LIMIT,
                     from_open_time_ms=from_open_time_ms,
+                    before_open_time_ms=before_open_time_ms,
                 )
         except RuntimeError as exc:
             result = "service_unavailable"
@@ -762,6 +790,62 @@ def create_app(settings: Settings) -> web.Application:
         finally:
             _log_chart_latency(log, "/chart/candles", started_at, result=result)
         return _json_ok(candles)
+
+    async def chart_gap_request_handler(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except (JSONDecodeError, UnicodeDecodeError):
+            return _json_err("invalid_request", "invalid JSON payload", status=400)
+
+        if not isinstance(body, dict):
+            return _json_err("invalid_request", "request body must be a JSON object", status=400)
+
+        raw_symbol = body.get("symbol")
+        symbol = str(raw_symbol or "").strip().upper()
+        if not symbol or not _is_valid_symbol(symbol):
+            return _json_err(
+                "invalid_request",
+                "field 'symbol' is required and must match ^[A-Z0-9]{2,20}$",
+                status=400,
+            )
+
+        raw_from = body.get("from_open_time_ms")
+        raw_to = body.get("to_open_time_ms")
+        try:
+            from_ms = int(raw_from)
+            to_ms = int(raw_to)
+        except (TypeError, ValueError):
+            return _json_err(
+                "invalid_request",
+                "fields 'from_open_time_ms' and 'to_open_time_ms' must be integers",
+                status=400,
+            )
+
+        if from_ms < 0 or to_ms <= from_ms:
+            return _json_err(
+                "invalid_request",
+                "'from_open_time_ms' must be >= 0 and < 'to_open_time_ms'",
+                status=400,
+            )
+
+        log = _request_logger(request)
+        try:
+            with _session_scope(request) as session:
+                gap_req = CandleGapRequest(
+                    symbol=symbol,
+                    from_open_time_ms=from_ms,
+                    to_open_time_ms=to_ms,
+                )
+                session.add(gap_req)
+                session.commit()
+        except RuntimeError as exc:
+            log.error("chart_gap_request_error", error=str(exc))
+            return _json_err("service_unavailable", "database session is unavailable", status=503)
+        except SQLAlchemyError:
+            log.exception("chart_gap_request_error")
+            return _json_err("db_error", "failed to store gap request")
+
+        return _json_ok({"queued": True})
 
     async def indicators_latest_handler(request: web.Request) -> web.Response:
         log = _request_logger(request)
@@ -985,6 +1069,7 @@ def create_app(settings: Settings) -> web.Application:
     app.router.add_get("/chart/symbols", chart_symbols_handler)
     app.router.add_get("/chart/timeframes", chart_timeframes_handler)
     app.router.add_get("/chart/candles", chart_candles_handler)
+    app.router.add_post("/chart/gap-request", chart_gap_request_handler)
     app.router.add_get("/indicators/latest", indicators_latest_handler)
     app.router.add_get("/indicators/history", indicators_history_handler)
     app.router.add_get("/metrics", metrics_handler)

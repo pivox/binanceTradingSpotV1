@@ -30,6 +30,7 @@ class ChartRepository:
         timeframe: str,
         limit: int,
         from_open_time_ms: int | None = None,
+        before_open_time_ms: int | None = None,
     ) -> list[dict[str, Any]]:
         if from_open_time_ms is not None:
             stmt = (
@@ -43,6 +44,20 @@ class ChartRepository:
                 .limit(limit)
             )
             rows = list(self._session.scalars(stmt))
+        elif before_open_time_ms is not None:
+            # Historical scroll: fetch candles older than the current view.
+            stmt = (
+                select(Candle)
+                .where(
+                    Candle.symbol == symbol,
+                    Candle.timeframe == timeframe,
+                    Candle.open_time_ms < before_open_time_ms,
+                )
+                .order_by(Candle.open_time_ms.desc())
+                .limit(limit)
+            )
+            rows = list(self._session.scalars(stmt))
+            rows.reverse()
         else:
             # Return the latest window, but always sorted ascending for chart rendering.
             stmt = (

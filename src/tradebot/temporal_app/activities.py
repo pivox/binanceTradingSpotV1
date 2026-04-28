@@ -68,8 +68,8 @@ BINANCE_REST_URL = "https://api.binance.com"
 MAX_KLINES_PER_REQUEST = 1_000
 GAP_REQUEST_BATCH_LIMIT = 500
 READY_JOBS_BATCH_LIMIT = 100
-SUPPORTED_GAP_REQUEST_TIMEFRAMES = ("1m",)
 DETECT_RECONCILE_TIMEFRAMES = ("1m", "5m", "15m", "1h", "4h")
+SUPPORTED_GAP_REQUEST_TIMEFRAMES = DETECT_RECONCILE_TIMEFRAMES
 DEFAULT_RECONCILE_SYMBOLS = ("BTCUSDC",)
 UPSERT_CANDLE_SQL = """
 INSERT INTO candles(
@@ -157,9 +157,10 @@ def _normalize_gap_request_window(
     *,
     from_open_time_ms: int,
     to_open_time_ms: int,
+    timeframe: Timeframe,
 ) -> tuple[int, int] | None:
-    # candle_gap_request stores [from, to) in 1m granularity.
-    end_inclusive = to_open_time_ms - timeframe_to_ms("1m")
+    # candle_gap_request stores [from, to) — convert to inclusive using the TF step.
+    end_inclusive = to_open_time_ms - timeframe_to_ms(timeframe)
     if end_inclusive < from_open_time_ms:
         return None
     return from_open_time_ms, end_inclusive
@@ -170,14 +171,17 @@ def _build_gaps_from_requests(
 ) -> dict[tuple[str, str], list[tuple[int, int]]]:
     by_symbol_tf: dict[tuple[str, str], list[tuple[int, int]]] = {}
     for req in requests:
-        normalized = _normalize_gap_request_window(
-            from_open_time_ms=int(req.from_open_time_ms),
-            to_open_time_ms=int(req.to_open_time_ms),
-        )
-        if normalized is None:
-            continue
         symbol = str(req.symbol).upper()
+        from_ms = int(req.from_open_time_ms)
+        to_ms = int(req.to_open_time_ms)
         for timeframe in SUPPORTED_GAP_REQUEST_TIMEFRAMES:
+            normalized = _normalize_gap_request_window(
+                from_open_time_ms=from_ms,
+                to_open_time_ms=to_ms,
+                timeframe=timeframe,
+            )
+            if normalized is None:
+                continue
             by_symbol_tf.setdefault((symbol, timeframe), []).append(normalized)
     return by_symbol_tf
 
@@ -1799,8 +1803,9 @@ async def detect_kline_leading_gaps() -> dict[str, Any]:
 
                 if max_open is None or int(max_open) < expected_latest_ms:
                     gap_from = int(max_open) + step_ms if max_open is not None else expected_latest_ms
-                    gap_to = expected_latest_ms
-                    if gap_from > gap_to:
+                    # exclusive upper bound so _normalize_gap_request_window includes expected_latest_ms
+                    gap_to = expected_latest_ms + step_ms
+                    if gap_from >= gap_to:
                         continue
 
                     # Avoid duplicate requests created in the last 5 minutes
@@ -1818,7 +1823,7 @@ async def detect_kline_leading_gaps() -> dict[str, Any]:
                     session.add(CandleGapRequest(
                         symbol=symbol,
                         from_open_time_ms=gap_from,
-                        to_open_time_ms=gap_to,
+                        to_open_time_ms=gap_to,  # exclusive: normalize subtracts step_ms
                     ))
                     gaps_found += 1
 

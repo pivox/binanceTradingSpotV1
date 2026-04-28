@@ -1919,7 +1919,8 @@ function handleVisibilityChange() {
 async function resolveInitialSelection(preferredSymbol = "", preferredTimeframe = "") {
   const parsedSymbol = String(preferredSymbol || "").trim().toUpperCase();
   const parsedTimeframe = String(preferredTimeframe || "").trim();
-  const initialSymbol = SYMBOL_RE.test(parsedSymbol) ? parsedSymbol : DEFAULT_SYMBOL;
+  const hasExplicitSymbol = SYMBOL_RE.test(parsedSymbol);
+  const initialSymbol = hasExplicitSymbol ? parsedSymbol : DEFAULT_SYMBOL;
   const initialTimeframe = TIMEFRAME_RE.test(parsedTimeframe)
     ? parsedTimeframe
     : DEFAULT_TIMEFRAME;
@@ -1943,8 +1944,26 @@ async function resolveInitialSelection(preferredSymbol = "", preferredTimeframe 
         };
       }
     }
+    // Symbol explicitly requested but has no data — honor the URL, show empty state
+    if (hasExplicitSymbol) {
+      return {
+        symbol: initialSymbol,
+        timeframe: timeframe || initialTimeframe,
+        timeframes: options,
+        candles: [],
+        symbols: [],
+      };
+    }
   } catch (_error) {
-    // Query may point to an unknown symbol; fall back to existing discovery flow.
+    if (hasExplicitSymbol) {
+      return {
+        symbol: initialSymbol,
+        timeframe: initialTimeframe,
+        timeframes: [],
+        candles: [],
+        symbols: [],
+      };
+    }
   }
 
   const defaultCandles = await fetchCandles(DEFAULT_SYMBOL, DEFAULT_TIMEFRAME);

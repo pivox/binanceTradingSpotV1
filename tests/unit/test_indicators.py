@@ -174,6 +174,20 @@ def test_vwap_raises_on_zero_volume() -> None:
         vwap([100.0, 101.0], [99.0, 100.0], [100.0, 101.0], [0.0, 0.0], times)
 
 
+def test_vwap_midnight_candle_belongs_to_previous_session() -> None:
+    # A candle closing exactly at midnight (ts == DAY_MS) belongs to day 0, not day 1.
+    midnight = DAY_MS
+    all_times = [midnight - MINUTE_MS, midnight, midnight + MINUTE_MS]
+    all_highs = [101.0, 101.0, 200.0]
+    all_lows = [99.0, 99.0, 198.0]
+    all_closes = [100.0, 100.0, 199.0]
+    all_volumes = [10.0, 10.0, 500.0]
+
+    result = vwap(all_highs, all_lows, all_closes, all_volumes, all_times)
+    # Latest session is day 1 (ts = midnight + MINUTE_MS). Only the day-1 candle contributes.
+    assert result == pytest.approx((200.0 + 198.0 + 199.0) / 3.0)
+
+
 def test_snapshot_exposes_available_values_and_pivots() -> None:
     candles = _two_session_candles(previous_count=20, current_count=20)
     snapshot = build_indicator_snapshot(

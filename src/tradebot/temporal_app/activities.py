@@ -592,7 +592,7 @@ async def validate_candle_event(evt: CandleCloseEvent) -> dict[str, Any]:
 async def compute_indicator_snapshot(
     symbol: str, timeframe: Timeframe, open_time_ms: int
 ) -> IndicatorSnapshot:
-    _WINDOW = 300  # 300 = EMA200 warmup (200) + full 5m day for VWAP (288 candles/day)
+    _WINDOW = 1500  # EMA200 warmup (200) + full 1m day for VWAP (1440 candles/day)
     settings = Settings()
     session_factory = create_session_factory(settings)
 

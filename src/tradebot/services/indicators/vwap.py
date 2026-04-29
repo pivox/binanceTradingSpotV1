@@ -17,13 +17,16 @@ def vwap(
     if not highs:
         raise ValueError("cannot compute vwap with empty data")
 
-    latest_session = close_times_ms[-1] // DAY_MS
+    # (ts - 1) // DAY_MS: a candle closing exactly at midnight belongs to the
+    # previous session (its open was 23:59:xx), not the new day.
+    latest_session = (close_times_ms[-1] - 1) // DAY_MS
     cumulative_tp_vol = 0.0
     cumulative_vol = 0.0
-    for hi, lo, cl, vol, ts in zip(highs, lows, closes, volumes, close_times_ms):
-        if ts // DAY_MS == latest_session:
-            cumulative_tp_vol += ((hi + lo + cl) / 3.0) * vol
-            cumulative_vol += vol
+    for i in range(len(close_times_ms) - 1, -1, -1):
+        if (close_times_ms[i] - 1) // DAY_MS != latest_session:
+            break
+        cumulative_tp_vol += ((highs[i] + lows[i] + closes[i]) / 3.0) * volumes[i]
+        cumulative_vol += volumes[i]
 
     if cumulative_vol <= 0:
         raise ValueError("cannot compute vwap with zero volume")

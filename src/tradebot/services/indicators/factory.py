@@ -5,10 +5,12 @@ from math import sqrt
 from time import time
 from typing import Any, Sequence
 
+from tradebot.services.indicators.adx import adx
 from tradebot.services.indicators.atr import atr
 from tradebot.services.indicators.ema import ema
 from tradebot.services.indicators.macd import macd
 from tradebot.services.indicators.rsi import rsi, rsi_series
+from tradebot.services.indicators.vwap import vwap
 
 DAY_MS = 86_400_000
 
@@ -57,70 +59,6 @@ def _bollinger(
     }
 
 
-def _adx(
-    highs: Sequence[float],
-    lows: Sequence[float],
-    closes: Sequence[float],
-    period: int = 14,
-) -> float:
-    if period <= 0:
-        raise ValueError("period must be > 0")
-    if not (len(highs) == len(lows) == len(closes)):
-        raise ValueError("highs, lows and closes must have the same length")
-    if len(closes) < (period * 2):
-        raise ValueError(
-            f"insufficient data for adx(period={period}): got {len(closes)} values"
-        )
-
-    plus_dm: list[float] = []
-    minus_dm: list[float] = []
-    tr_values: list[float] = []
-
-    for index in range(1, len(closes)):
-        up_move = highs[index] - highs[index - 1]
-        down_move = lows[index - 1] - lows[index]
-        plus_dm.append(up_move if up_move > down_move and up_move > 0 else 0.0)
-        minus_dm.append(down_move if down_move > up_move and down_move > 0 else 0.0)
-        tr_values.append(
-            max(
-                highs[index] - lows[index],
-                abs(highs[index] - closes[index - 1]),
-                abs(lows[index] - closes[index - 1]),
-            )
-        )
-
-    smooth_tr = sum(tr_values[:period]) / period
-    smooth_plus_dm = sum(plus_dm[:period]) / period
-    smooth_minus_dm = sum(minus_dm[:period]) / period
-
-    dx_values: list[float] = []
-    for index in range(period - 1, len(tr_values)):
-        if index > period - 1:
-            smooth_tr = ((smooth_tr * (period - 1)) + tr_values[index]) / period
-            smooth_plus_dm = ((smooth_plus_dm * (period - 1)) + plus_dm[index]) / period
-            smooth_minus_dm = (
-                (smooth_minus_dm * (period - 1)) + minus_dm[index]
-            ) / period
-
-        plus_di = (100.0 * smooth_plus_dm / smooth_tr) if smooth_tr else 0.0
-        minus_di = (100.0 * smooth_minus_dm / smooth_tr) if smooth_tr else 0.0
-        denominator = plus_di + minus_di
-        if denominator == 0.0:
-            dx_values.append(0.0)
-        else:
-            dx_values.append(100.0 * abs(plus_di - minus_di) / denominator)
-
-    if len(dx_values) < period:
-        raise ValueError(
-            f"insufficient data for adx(period={period}): got {len(closes)} values"
-        )
-
-    adx_value = sum(dx_values[:period]) / period
-    for dx in dx_values[period:]:
-        adx_value = ((adx_value * (period - 1)) + dx) / period
-    return adx_value
-
-
 def _stoch_rsi(
     values: Sequence[float],
     rsi_period: int = 14,
@@ -162,22 +100,6 @@ def _stoch_rsi(
         d_values.append(sum(window) / d_period)
 
     return {"k": k_values[-1], "d": d_values[-1]}
-
-
-def _vwap(candles: Sequence[CandleSample]) -> float:
-    latest_session = candles[-1].close_time_ms // DAY_MS
-    session_candles = [
-        candle for candle in candles if candle.close_time_ms // DAY_MS == latest_session
-    ]
-    total_volume = sum(candle.volume for candle in session_candles)
-    if total_volume <= 0:
-        raise ValueError("cannot compute vwap with zero volume")
-
-    weighted_price_sum = 0.0
-    for candle in session_candles:
-        typical_price = (candle.high + candle.low + candle.close) / 3.0
-        weighted_price_sum += typical_price * candle.volume
-    return weighted_price_sum / total_volume
 
 
 def _pivots(candles: Sequence[CandleSample]) -> dict[str, float]:
@@ -290,12 +212,14 @@ def build_indicator_snapshot(
         snapshot["macd"] = _namespace_unavailable(("macd", "signal", "hist"), "warmup")
 
     try:
-        snapshot["vwap"] = _available(_vwap(sorted_candles))
+        volumes = [float(candle.volume) for candle in sorted_candles]
+        close_times = [candle.close_time_ms for candle in sorted_candles]
+        snapshot["vwap"] = _available(vwap(highs, lows, closes, volumes, close_times))
     except ValueError:
         snapshot["vwap"] = _unavailable("missing_history")
 
     if len(closes) >= 28:
-        snapshot["adx"] = _available(_adx(highs, lows, closes, period=14))
+        snapshot["adx"] = _available(adx(highs, lows, closes, period=14))
     else:
         snapshot["adx"] = _unavailable("warmup")
 

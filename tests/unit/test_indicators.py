@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import pytest
 
+from tradebot.services.indicators.adx import adx
 from tradebot.services.indicators.atr import atr
 from tradebot.services.indicators.ema import ema
 from tradebot.services.indicators.factory import CandleSample, build_indicator_snapshot
 from tradebot.services.indicators.macd import macd
 from tradebot.services.indicators.rsi import rsi, rsi_series
+from tradebot.services.indicators.vwap import vwap
 
 DAY_MS = 86_400_000
 MINUTE_MS = 60_000
@@ -114,6 +116,62 @@ def test_snapshot_keeps_rsi_in_warmup_at_14_candles() -> None:
 
     assert snapshot["rsi"] == {"status": "unavailable", "reason": "warmup"}
     assert snapshot["atr"]["status"] == "available"
+
+
+def test_adx_returns_value_in_valid_range() -> None:
+    n = 40
+    highs = [100.0 + i * 0.5 for i in range(n)]
+    lows = [99.0 + i * 0.5 for i in range(n)]
+    closes = [99.5 + i * 0.5 for i in range(n)]
+
+    value = adx(highs, lows, closes, period=14)
+    assert 0.0 <= value <= 100.0
+
+
+def test_adx_raises_on_insufficient_data() -> None:
+    with pytest.raises(ValueError, match="insufficient data"):
+        adx([1.0] * 10, [0.9] * 10, [0.95] * 10, period=14)
+
+
+def test_adx_raises_on_mismatched_lengths() -> None:
+    with pytest.raises(ValueError, match="same length"):
+        adx([1.0, 2.0], [1.0], [1.0, 2.0], period=14)
+
+
+def test_vwap_uses_only_current_session() -> None:
+    # previous session (day 0)
+    prev_highs = [101.0, 102.0]
+    prev_lows = [99.0, 100.0]
+    prev_closes = [100.0, 101.0]
+    prev_volumes = [1000.0, 1000.0]
+    prev_times = [int(DAY_MS * 0.4), int(DAY_MS * 0.8)]
+
+    # current session (day 1) — typical price 200, volume 500
+    cur_highs = [201.0, 202.0]
+    cur_lows = [199.0, 200.0]
+    cur_closes = [200.0, 201.0]
+    cur_volumes = [500.0, 500.0]
+    cur_times = [DAY_MS + int(DAY_MS * 0.2), DAY_MS + int(DAY_MS * 0.4)]
+
+    all_highs = prev_highs + cur_highs
+    all_lows = prev_lows + cur_lows
+    all_closes = prev_closes + cur_closes
+    all_volumes = prev_volumes + cur_volumes
+    all_times = prev_times + cur_times
+
+    result = vwap(all_highs, all_lows, all_closes, all_volumes, all_times)
+
+    # VWAP must reflect only current session candles, not previous session
+    expected_tp1 = (201.0 + 199.0 + 200.0) / 3.0
+    expected_tp2 = (202.0 + 200.0 + 201.0) / 3.0
+    expected = (expected_tp1 * 500.0 + expected_tp2 * 500.0) / 1000.0
+    assert result == pytest.approx(expected)
+
+
+def test_vwap_raises_on_zero_volume() -> None:
+    times = [int(DAY_MS * 0.5), int(DAY_MS * 0.6)]
+    with pytest.raises(ValueError, match="zero volume"):
+        vwap([100.0, 101.0], [99.0, 100.0], [100.0, 101.0], [0.0, 0.0], times)
 
 
 def test_snapshot_exposes_available_values_and_pivots() -> None:

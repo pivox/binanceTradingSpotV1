@@ -223,6 +223,29 @@ class MtfState(Base):
     )
 
 
+class MtfSignalRecord(Base):
+    __tablename__ = "mtf_signals"
+    __table_args__ = (
+        Index("ix_mtf_signals_symbol_eval", "symbol", "evaluated_at_ms"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    profile = Column(String(50), nullable=False)
+    trend_4h = Column(Boolean, nullable=False)
+    trend_1h = Column(Boolean, nullable=False)
+    structure_15m = Column(Boolean, nullable=False)
+    trigger_5m = Column(Boolean, nullable=False)
+    score = Column(Integer, nullable=False)
+    valid = Column(Boolean, nullable=False)
+    blocking_filter = Column(String(100), nullable=True)
+    context_json = Column(JSON, nullable=False)
+    evaluated_at_ms = Column(BigInteger, nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class PnlTrade(Base):
     __tablename__ = "pnl_trades"
     __table_args__ = (

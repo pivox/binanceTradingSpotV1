@@ -1,5 +1,4 @@
 # Tradebot
-
 Bot de trading spot Binance avec exécution live et backtesting. Architecture orientée événements : un daemon WebSocket collecte les klines en temps réel, Temporal.io orchestre le backfill et les activités métier, et une API aiohttp expose les données au frontend chart.
 
 ## Quick start
@@ -86,6 +85,23 @@ UI :
 
 - `http://API_HOST:API_PORT/` — panneau de contrôle (daemon status, switch live/backtesting)
 - `http://API_HOST:API_PORT/chart` — chart des klines
+
+## MTF Validator (Phase 1b ✅)
+
+Fonction pure `validate(symbol, snapshots, profile) -> MTFSignal` — aucun accès DB, testable sans infrastructure. Profil de conditions chargé depuis `config/validations.regular.yaml`.
+
+**Scoring** : 4h = 40 pts · 1h = 30 pts · 15m = 30 pts · total = 100. Seuil par défaut : 60 (à calibrer en Phase 2).
+
+| Timeframe | Conditions (`all_of`) | Pts max |
+|-----------|----------------------|---------|
+| 4h | `ema20_above_ema50`, `ema50_above_ema200`, `rsi_between_45_70`, `macd_hist_positive` | 40 |
+| 1h | `price_above_ema20`, `adx_gt_25`, `macd_hist_positive_or_rising` | 30 |
+| 15m | `rsi_between_40_60`, `price_near_ema20`, `atr_contracting` | 30 |
+| 5m _(trigger)_ | `macd_hist_turning_positive` ou `close_above_recent_high` (`any_of`) | — |
+
+**Filtres bloquants** (invalident peu importe le score) : RSI 4h > 75 · Prix 4h > EMA20 + 2×ATR · ADX 1h < 20 · MACD 1h histogramme négatif et en baisse.
+
+Chaque évaluation (y compris `valid=False`) est persistée dans la table `mtf_signals` pour le backtesting Phase 2.
 
 ## Indicateurs calculés (Phase 1a ✅)
 

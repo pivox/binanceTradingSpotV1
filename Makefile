@@ -4,7 +4,7 @@ DATABASE_URL ?= postgresql://user:pass@localhost:5433/tradebot
 SYMBOLS ?= SOLUSDC
 SHARD_COUNT ?= 8
 
-.PHONY: start stop infra-up infra-down db-up daemon worker api logs
+.PHONY: start stop infra-up infra-down db-up daemon worker api user-stream backtest logs
 
 # ── Main entry point ─────────────────────────────────────────────────────────
 start:
@@ -40,6 +40,9 @@ api:
 
 user-stream:
 	poetry run python -m tradebot.apps.user_stream_main
+
+backtest:
+	poetry run python -m tradebot.apps.backtest_main
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 logs:

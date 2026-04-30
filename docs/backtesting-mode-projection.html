@@ -939,6 +939,40 @@ Recommendation PO:
       { id: "T-018", setup: "A", entryIndex: 166, exitIndex: 186, entry: 68120, exit: 70440, sl: 66780, tp: 70130, pnl: 1.73, mfe: 3.21, mae: -0.36, reason: "TP", score: 84 }
     ];
     let selectedTradeIndex = 2;
+    const MTF_CONTEXT_SCORES = { "4h": 34, "1h": 24, "15m": 23 };
+    const MTF_CONTEXT_SCORE_TOTAL = Object.values(MTF_CONTEXT_SCORES)
+      .reduce((total, score) => total + score, 0);
+    const NAV_TAB_BY_TARGET = {
+      comparaison: "compareRuns",
+      rapport: "reportPanel"
+    };
+
+    function appendText(parent, tagName, text, className) {
+      const element = document.createElement(tagName);
+      if (className) element.className = className;
+      element.textContent = text;
+      parent.appendChild(element);
+      return element;
+    }
+
+    function appendKv(parent, items) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "kv";
+      items.forEach(item => {
+        appendText(wrapper, "span", item.label);
+        appendText(wrapper, "strong", item.value, item.className);
+      });
+      parent.appendChild(wrapper);
+      return wrapper;
+    }
+
+    function formatPrice(value) {
+      return Number(value).toLocaleString("fr-FR");
+    }
+
+    function formatSignedPercent(value) {
+      return `${value >= 0 ? "+" : ""}${Number(value).toFixed(2)}%`;
+    }
 
     function seedCandles() {
       let price = 64200;
@@ -955,9 +989,22 @@ Recommendation PO:
     }
 
     function priceRange() {
-      const highs = candles.map(c => c.high);
-      const lows = candles.map(c => c.low);
-      return { min: Math.min(...lows) - 500, max: Math.max(...highs) + 500 };
+      if (!candles.length) return { min: 0, max: 1000 };
+
+      let min = Infinity;
+      let max = -Infinity;
+      for (const candle of candles) {
+        if (candle.low < min) min = candle.low;
+        if (candle.high > max) max = candle.high;
+      }
+
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        return { min: 0, max: 1000 };
+      }
+      if (min === max) {
+        return { min: min - 500, max: max + 500 };
+      }
+      return { min: min - 500, max: max + 500 };
     }
 
     function drawChart() {
@@ -975,13 +1022,22 @@ Recommendation PO:
       const chartW = width - pad.left - pad.right;
       const chartH = height - pad.top - pad.bottom;
       const range = priceRange();
-      const y = price => pad.top + (range.max - price) / (range.max - range.min) * chartH;
-      const x = index => pad.left + index / (candles.length - 1) * chartW;
-      const candleW = Math.max(3, chartW / candles.length * 0.62);
 
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = "#fbfcfd";
       ctx.fillRect(0, 0, width, height);
+
+      if (!candles.length || chartW <= 0 || chartH <= 0) {
+        ctx.fillStyle = "#657383";
+        ctx.font = "13px sans-serif";
+        ctx.fillText("Aucune bougie disponible pour cette projection.", pad.left, pad.top + 24);
+        return;
+      }
+
+      const rangeHeight = range.max - range.min || 1;
+      const y = price => pad.top + (range.max - price) / rangeHeight * chartH;
+      const x = index => pad.left + index / Math.max(1, candles.length - 1) * chartW;
+      const candleW = Math.max(3, chartW / Math.max(1, candles.length) * 0.62);
 
       ctx.strokeStyle = "#e3e9ef";
       ctx.lineWidth = 1;
@@ -1088,42 +1144,45 @@ Recommendation PO:
     function renderTradeDetail() {
       const t = trades[selectedTradeIndex];
       const cls = t.pnl >= 0 ? "positive" : "negative";
-      document.getElementById("tradeDetail").innerHTML = `
-        <h3>${t.id} - Setup ${t.setup}</h3>
-        <div class="kv">
-          <span>Score MTF</span><strong>${t.score}</strong>
-          <span>Entry</span><strong>${t.entry.toLocaleString("fr-FR")}</strong>
-          <span>Exit</span><strong>${t.exit.toLocaleString("fr-FR")}</strong>
-          <span>Stop-loss</span><strong>${t.sl.toLocaleString("fr-FR")}</strong>
-          <span>Take-profit</span><strong>${t.tp.toLocaleString("fr-FR")}</strong>
-          <span>PnL</span><strong class="${cls}">${t.pnl.toFixed(2)} R</strong>
-        </div>`;
-      document.getElementById("focusTrade").innerHTML = `
-        <div class="kv">
-          <span>Trade</span><strong>${t.id}</strong>
-          <span>Setup</span><strong>${t.setup}</strong>
-          <span>Raison sortie</span><strong>${t.reason}</strong>
-          <span>MFE</span><strong class="positive">+${t.mfe.toFixed(2)}%</strong>
-          <span>MAE</span><strong class="negative">${t.mae.toFixed(2)}%</strong>
-          <span>Regle meme bougie</span><strong>Pessimiste SL avant TP</strong>
-        </div>`;
+      const tradeDetail = document.getElementById("tradeDetail");
+      const focusTrade = document.getElementById("focusTrade");
+      tradeDetail.replaceChildren();
+      focusTrade.replaceChildren();
+
+      appendText(tradeDetail, "h3", `${t.id} - Setup ${t.setup}`);
+      appendKv(tradeDetail, [
+        { label: "Score MTF", value: String(t.score) },
+        { label: "Entry", value: formatPrice(t.entry) },
+        { label: "Exit", value: formatPrice(t.exit) },
+        { label: "Stop-loss", value: formatPrice(t.sl) },
+        { label: "Take-profit", value: formatPrice(t.tp) },
+        { label: "PnL", value: `${t.pnl.toFixed(2)} R`, className: cls }
+      ]);
+
+      appendKv(focusTrade, [
+        { label: "Trade", value: t.id },
+        { label: "Setup", value: t.setup },
+        { label: "Raison sortie", value: t.reason },
+        { label: "MFE", value: formatSignedPercent(t.mfe), className: "positive" },
+        { label: "MAE", value: formatSignedPercent(t.mae), className: "negative" },
+        { label: "Regle meme bougie", value: "Pessimiste SL avant TP" }
+      ]);
     }
 
     function renderTradesTable() {
       const tbody = document.querySelector("#tradesTable tbody");
-      tbody.innerHTML = "";
+      tbody.replaceChildren();
       trades.forEach((t, idx) => {
         const row = document.createElement("tr");
         if (idx === selectedTradeIndex) row.classList.add("selected");
-        row.innerHTML = `
-          <td>${t.id}</td>
-          <td>${t.setup}</td>
-          <td>${t.entry.toLocaleString("fr-FR")}</td>
-          <td>${t.exit.toLocaleString("fr-FR")}</td>
-          <td class="${t.pnl >= 0 ? "positive" : "negative"}">${t.pnl.toFixed(2)}</td>
-          <td class="positive">+${t.mfe.toFixed(2)}%</td>
-          <td class="negative">${t.mae.toFixed(2)}%</td>
-          <td>${t.reason}</td>`;
+        appendText(row, "td", t.id);
+        appendText(row, "td", t.setup);
+        appendText(row, "td", formatPrice(t.entry));
+        appendText(row, "td", formatPrice(t.exit));
+        appendText(row, "td", t.pnl.toFixed(2), t.pnl >= 0 ? "positive" : "negative");
+        appendText(row, "td", formatSignedPercent(t.mfe), "positive");
+        appendText(row, "td", formatSignedPercent(t.mae), "negative");
+        appendText(row, "td", t.reason);
         row.addEventListener("click", () => {
           selectedTradeIndex = idx;
           renderAll();
@@ -1134,18 +1193,33 @@ Recommendation PO:
 
     function renderMtf() {
       const t = trades[selectedTradeIndex];
+      const triggerScore = Math.max(0, t.score - MTF_CONTEXT_SCORE_TOTAL);
       const rows = [
-        ["4h", 34, "Trend EMA + RSI"],
-        ["1h", 24, "ADX + MACD"],
-        ["15m", 23, "Structure pullback"],
-        ["5m", t.score - 60, "Trigger close"]
+        ["4h", MTF_CONTEXT_SCORES["4h"], "Trend EMA + RSI"],
+        ["1h", MTF_CONTEXT_SCORES["1h"], "ADX + MACD"],
+        ["15m", MTF_CONTEXT_SCORES["15m"], "Structure pullback"],
+        ["5m", triggerScore, "Trigger close"]
       ];
-      document.getElementById("mtfList").innerHTML = rows.map(([tf, score, label]) => `
-        <li>
-          <strong>${tf}</strong>
-          <div><div class="bar"><span style="width:${Math.max(10, Number(score) * 2)}%"></span></div><small>${label}</small></div>
-          <span>${score} pts</span>
-        </li>`).join("");
+      const list = document.getElementById("mtfList");
+      list.replaceChildren();
+      rows.forEach(([tf, score, label]) => {
+        const item = document.createElement("li");
+        appendText(item, "strong", tf);
+
+        const detail = document.createElement("div");
+        const bar = document.createElement("div");
+        const fill = document.createElement("span");
+        const width = Math.min(100, Math.max(10, Number(score) * 2));
+        bar.className = "bar";
+        fill.style.width = `${width}%`;
+        bar.appendChild(fill);
+        detail.appendChild(bar);
+        appendText(detail, "small", label);
+
+        item.appendChild(detail);
+        appendText(item, "span", `${score} pts`);
+        list.appendChild(item);
+      });
     }
 
     function renderAll() {
@@ -1158,10 +1232,7 @@ Recommendation PO:
     function attachHandlers() {
       document.querySelectorAll(".tab").forEach(button => {
         button.addEventListener("click", () => {
-          document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
-          document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
-          button.classList.add("active");
-          document.getElementById(button.dataset.tab).classList.add("active");
+          setActiveTab(button.dataset.tab);
         });
       });
 
@@ -1169,7 +1240,7 @@ Recommendation PO:
         button.addEventListener("click", () => {
           document.querySelectorAll(".nav button").forEach(b => b.classList.remove("active"));
           button.classList.add("active");
-          document.getElementById(button.dataset.scroll).scrollIntoView({ behavior: "smooth", block: "start" });
+          scrollToTarget(button.dataset.scroll);
         });
       });
 
@@ -1191,11 +1262,32 @@ Recommendation PO:
       });
 
       document.getElementById("exportReport").addEventListener("click", () => {
-        document.querySelector('[data-tab="reportPanel"]').click();
-        document.getElementById("rapport").focus();
+        setActiveTab("reportPanel");
+        requestAnimationFrame(() => document.getElementById("rapport").focus());
       });
 
       window.addEventListener("resize", drawChart);
+    }
+
+    function setActiveTab(tabId) {
+      const tab = document.querySelector(`[data-tab="${tabId}"]`);
+      const panel = document.getElementById(tabId);
+      if (!tab || !panel) return;
+
+      document.querySelectorAll(".tab").forEach(button => button.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(item => item.classList.remove("active"));
+      tab.classList.add("active");
+      panel.classList.add("active");
+    }
+
+    function scrollToTarget(targetId) {
+      const tabId = NAV_TAB_BY_TARGET[targetId];
+      if (tabId) setActiveTab(tabId);
+
+      requestAnimationFrame(() => {
+        const target = document.getElementById(targetId);
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     }
 
     seedCandles();

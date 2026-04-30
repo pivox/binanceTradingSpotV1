@@ -1,0 +1,43 @@
+profile: regular
+
+context:
+  '4h':
+    long:
+      all_of:
+        - ema20_above_ema50
+        - ema50_above_ema200
+        - rsi_between_45_70
+        - macd_hist_positive
+    score_max: 40
+
+  '1h':
+    long:
+      all_of:
+        - price_above_ema20
+        - adx_gt_25
+        - macd_hist_positive_or_rising
+    score_max: 30
+
+  '15m':
+    long:
+      all_of:
+        - rsi_between_40_60
+        - price_near_ema20
+        - atr_contracting
+    score_max: 30
+
+trigger:
+  '5m':
+    long:
+      any_of:
+        - macd_hist_turning_positive
+        - close_above_recent_high
+
+blocking_filters:
+  - rsi_4h_gt_75
+  - price_4h_gt_ema20_plus_2atr
+  - adx_1h_lt_20
+  - macd_1h_hist_negative_and_falling
+
+# Seuil minimal pour valid=True — à calibrer en Phase 2
+threshold: 60

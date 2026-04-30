@@ -161,6 +161,7 @@ def build_indicator_snapshot(
         "timeframe": timeframe,
         "close_time": sorted_candles[-1].close_time_ms,
         "computed_at": computed_at if computed_at is not None else int(time() * 1000),
+        "close_price": float(sorted_candles[-1].close),
     }
 
     if len(closes) >= 15:

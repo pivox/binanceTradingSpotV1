@@ -264,6 +264,57 @@ class PnlTrade(Base):
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
 
+class BacktestRun(Base):
+    __tablename__ = "backtest_runs"
+    __table_args__ = (
+        Index("ix_backtest_runs_symbol", "symbol"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    symbol = Column(String(20), nullable=False)
+    from_ms = Column(BigInteger, nullable=False)
+    to_ms = Column(BigInteger, nullable=False)
+    profile = Column(String(50), nullable=False)
+    config_json = Column(JSON, nullable=False)
+    total_trades = Column(Integer, nullable=False)
+    closed_trades = Column(Integer, nullable=False)
+    winning_trades = Column(Integer, nullable=False)
+    winrate = Column(Float, nullable=False)
+    profit_factor = Column(Float, nullable=False)
+    max_drawdown_pct = Column(Float, nullable=False)
+    expectancy_r = Column(Float, nullable=False)
+    avg_mfe_pct = Column(Float, nullable=False)
+    avg_mae_pct = Column(Float, nullable=False)
+    passes_phase_gate = Column(Boolean, nullable=False)
+    ran_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
+class BacktestTradeRecord(Base):
+    __tablename__ = "backtest_trades"
+    __table_args__ = (
+        Index("ix_backtest_trades_run", "run_id"),
+        Index("ix_backtest_trades_symbol_entry", "symbol", "entry_time_ms"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    run_id = Column(String(36), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    entry_time_ms = Column(BigInteger, nullable=False)
+    entry_price = Column(Float, nullable=False)
+    stop_loss = Column(Float, nullable=False)
+    take_profit = Column(Float, nullable=False)
+    sl_method = Column(String(20), nullable=False)
+    exit_time_ms = Column(BigInteger, nullable=True)
+    exit_price = Column(Float, nullable=True)
+    exit_reason = Column(String(10), nullable=True)
+    pnl_r = Column(Float, nullable=True)
+    mfe_pct = Column(Float, nullable=True)
+    mae_pct = Column(Float, nullable=True)
+    signal_score = Column(Integer, nullable=False)
+    signal_context_json = Column(JSON, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
 class ExchangeInfoCache(Base):
     __tablename__ = "exchange_info_cache"
 

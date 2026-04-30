@@ -3,7 +3,14 @@
 Format snapshot attendu : payload_json produit par factory.py.
   Scalaires  : {"status": "available", "value": X}
   Namespaced : macd → {"macd": {…}, "signal": {…}, "hist": {…}}
-  close_price : float brut (ajouté par factory)
+  close_price : float brut (ajouté par factory depuis la Phase 1b)
+
+NOTE close_price : les snapshots persistés avant la Phase 1b n'ont pas ce champ.
+Les conditions qui en dépendent (price_above_ema20, price_near_ema20,
+close_above_recent_high, atr_contracting en fallback) retournent False si absent.
+Pour le backtesting Phase 2, le caller doit injecter close_price depuis la table
+candles avant d'appeler validate() :
+    payload = {**snapshot.payload_json, "close_price": candle.close}
 """
 from __future__ import annotations
 
@@ -141,9 +148,9 @@ def price_4h_gt_ema20_plus_2atr(snaps: dict[str, dict], _prev: dict | None = Non
     close = _close(snap)
     ema20 = _val(snap, "ema20")
     atr = _val(snap, "atr")
-    if None in (close, ema20, atr):
+    if close is None or ema20 is None or atr is None:
         return False
-    return close > ema20 + 2.0 * atr  # type: ignore[operator]
+    return close > ema20 + 2.0 * atr
 
 
 def adx_1h_lt_20(snaps: dict[str, dict], _prev: dict | None = None) -> bool:

@@ -108,12 +108,13 @@ def _eval_tf(
     prev_snap: dict[str, Any] | None,
 ) -> tuple[dict[str, bool], int]:
     n = len(conditions)
-    pts_each = score_max // n if n else 0
     results: dict[str, bool] = {}
     for name in conditions:
         fn = _CONDITION_REGISTRY[name]
         results[name] = fn(snap, prev_snap)
-    score = sum(results.values()) * pts_each
+    # Proportionnel : garantit que score == score_max quand toutes les conditions passent,
+    # quelle que soit la divisibilité de score_max par n.
+    score = int(score_max * sum(results.values()) / n) if n else 0
     return results, score
 
 

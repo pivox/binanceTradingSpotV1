@@ -412,6 +412,7 @@ async function loadAndRenderTrades(runId, cursor, filters) {
     renderTradesTable(state.currentTrades);
     document.getElementById("tradesSection").style.display = "block";
     document.getElementById("btnNextTrades").disabled = !state.tradesCursor;
+    document.getElementById("btnPrevTrades").disabled = state.tradesPrevCursors.length === 0;
     if (state.currentSymbol && state.currentFromMs && state.currentToMs) {
       renderChart(state.currentSymbol, state.currentFromMs, state.currentToMs, state.currentTrades);
     }
@@ -508,6 +509,7 @@ async function loadRuns(cursor) {
     state.runsCursor = payload.data.next_cursor || null;
     renderRunsList(payload.data.items || []);
     document.getElementById("btnNextRuns").disabled = !state.runsCursor;
+    document.getElementById("btnPrevRuns").disabled = state.runsPrevCursors.length === 0;
   } catch (_) {}
 }
 

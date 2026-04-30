@@ -72,7 +72,7 @@ class BacktestEngine:
         candles_5m = self._candle_repo.fetch_range(
             symbol, trigger_tf, from_ms, to_ms + _MAX_HOLD_MS
         )
-        candles_sorted = sorted(candles_5m, key=lambda c: c.close_time_ms)
+        candles_sorted = candles_5m  # already ASC by open_time_ms from fetch_range
 
         trades: list[BacktestTrade] = []
 
@@ -102,9 +102,15 @@ class BacktestEngine:
             except ValueError:
                 continue
 
-            after_entry = [c for c in candles_sorted if c.close_time_ms > close_time_ms]
+            lo, hi = 0, len(candles_sorted)
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if candles_sorted[mid].close_time_ms <= close_time_ms:
+                    lo = mid + 1
+                else:
+                    hi = mid
             exit_time_ms, exit_price, exit_reason, mfe_pct, mae_pct = simulate_exit(
-                entry_price, sl, tp, after_entry
+                entry_price, sl, tp, candles_sorted[lo:]
             )
 
             pnl_r: float | None = None
@@ -121,7 +127,7 @@ class BacktestEngine:
                 sl_method=sl_method,
                 exit_time_ms=exit_time_ms,
                 exit_price=exit_price,
-                exit_reason=exit_reason,  # type: ignore[arg-type]
+                exit_reason=exit_reason,
                 pnl_r=pnl_r,
                 mfe_pct=mfe_pct,
                 mae_pct=mae_pct,

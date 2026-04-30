@@ -58,23 +58,32 @@ def simulate_exit(
     stop_loss: float,
     take_profit: float,
     candles_after_entry: list[Candle],
-) -> tuple[int | None, float | None, str, float, float]:
+) -> tuple[int | None, float | None, Literal["TP", "SL", "OPEN"], float, float]:
     """
     Walk forward through candles to find the first SL or TP hit.
 
     Returns (exit_time_ms, exit_price, exit_reason, mfe_pct, mae_pct).
-    Pessimistic: SL checked before TP within the same candle.
+    Gap-aware and pessimistic: a candle that opens through SL exits at open price
+    (not at stop_loss), and SL is checked before TP within the same candle.
     """
     mfe_pct = 0.0
     mae_pct = 0.0
 
     for candle in candles_after_entry:
+        open_p = float(candle.open)
         high = float(candle.high)
         low = float(candle.low)
 
         mfe_pct = max(mfe_pct, (high - entry_price) / entry_price * 100.0)
         mae_pct = max(mae_pct, (entry_price - low) / entry_price * 100.0)
 
+        # Gap at open (pessimistic: SL first)
+        if open_p <= stop_loss:
+            return candle.close_time_ms, open_p, "SL", mfe_pct, mae_pct
+        if open_p >= take_profit:
+            return candle.close_time_ms, open_p, "TP", mfe_pct, mae_pct
+
+        # Intra-candle (pessimistic: SL first)
         if low <= stop_loss:
             return candle.close_time_ms, stop_loss, "SL", mfe_pct, mae_pct
         if high >= take_profit:

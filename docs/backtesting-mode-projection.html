@@ -1,0 +1,1298 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tradebot - Projection Backtesting</title>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --surface-2: #eef3f7;
+      --border: #d8e0e8;
+      --text: #18212b;
+      --muted: #657383;
+      --blue: #2364aa;
+      --green: #18805f;
+      --red: #b33f3f;
+      --amber: #a66a00;
+      --ink: #0f1720;
+      --shadow: 0 10px 28px rgba(25, 35, 45, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 232px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: #17202a;
+      color: #e9eef4;
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 7px;
+      background: #2e8c73;
+      display: grid;
+      place-items: center;
+      color: #ffffff;
+      font-weight: 800;
+    }
+
+    .nav {
+      display: grid;
+      gap: 6px;
+    }
+
+    .nav button {
+      border: 0;
+      color: #ccd6e0;
+      background: transparent;
+      padding: 10px 10px;
+      border-radius: 6px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .nav button.active,
+    .nav button:hover {
+      color: #ffffff;
+      background: #263442;
+    }
+
+    .sidebar-status {
+      margin-top: auto;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      padding-top: 14px;
+      color: #b9c6d2;
+      line-height: 1.45;
+    }
+
+    .main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 4;
+    }
+
+    .title-block h1 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.25;
+    }
+
+    .title-block p {
+      margin: 3px 0 0;
+      color: var(--muted);
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      border-radius: 6px;
+      height: 36px;
+      padding: 0 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .btn.primary {
+      background: var(--blue);
+      color: #ffffff;
+      border-color: var(--blue);
+    }
+
+    .btn.ghost {
+      background: transparent;
+    }
+
+    .content {
+      padding: 18px 20px 28px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .band {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .band-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .band-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .band-subtitle {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .config-grid {
+      padding: 14px 16px 16px;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 12px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .field input,
+    .field select {
+      width: 100%;
+      height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--text);
+      padding: 0 10px;
+      min-width: 0;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(112px, 1fr));
+      gap: 10px;
+    }
+
+    .kpi {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 82px;
+    }
+
+    .kpi span {
+      color: var(--muted);
+      font-size: 12px;
+      display: block;
+    }
+
+    .kpi strong {
+      margin-top: 8px;
+      display: block;
+      font-size: 20px;
+      line-height: 1.15;
+    }
+
+    .kpi.pass strong {
+      color: var(--green);
+    }
+
+    .kpi.fail strong {
+      color: var(--red);
+    }
+
+    .kpi.warn strong {
+      color: var(--amber);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .chart-wrap {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .chart-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      min-height: 28px;
+    }
+
+    .chart-area {
+      position: relative;
+      min-height: 460px;
+      background: #fbfcfd;
+    }
+
+    canvas {
+      width: 100%;
+      height: 460px;
+      display: block;
+    }
+
+    .trade-popover {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 240px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.96);
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: var(--shadow);
+    }
+
+    .trade-popover h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .kv strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .side-panel {
+      display: grid;
+      gap: 16px;
+    }
+
+    .readiness {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .readiness th,
+    .readiness td {
+      text-align: left;
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .readiness th {
+      color: var(--muted);
+      font-weight: 700;
+      background: var(--surface-2);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+
+    .status-pill.ok {
+      color: var(--green);
+      background: #e8f5ef;
+      border-color: #bfe3d2;
+    }
+
+    .status-pill.warn {
+      color: var(--amber);
+      background: #fff4dc;
+      border-color: #f2d491;
+    }
+
+    .status-pill.fail {
+      color: var(--red);
+      background: #fae8e8;
+      border-color: #edc2c2;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 12px 0;
+    }
+
+    .tab {
+      border: 0;
+      background: transparent;
+      padding: 10px 10px;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+    }
+
+    .tab.active {
+      color: var(--blue);
+      border-color: var(--blue);
+      font-weight: 700;
+    }
+
+    .tab-panel {
+      display: none;
+      padding: 14px 16px 16px;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.55fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .data-table th,
+    .data-table td {
+      padding: 10px 10px;
+      border-bottom: 1px solid var(--border);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .data-table th:first-child,
+    .data-table td:first-child,
+    .data-table th:nth-child(2),
+    .data-table td:nth-child(2) {
+      text-align: left;
+    }
+
+    .data-table th {
+      color: var(--muted);
+      background: var(--surface-2);
+      font-weight: 700;
+    }
+
+    .data-table tr {
+      cursor: pointer;
+    }
+
+    .data-table tr.selected {
+      background: #edf5ff;
+    }
+
+    .positive {
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .negative {
+      color: var(--red);
+      font-weight: 700;
+    }
+
+    .neutral {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .explain-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .explain-list li {
+      display: grid;
+      grid-template-columns: 56px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
+      padding: 8px 0;
+    }
+
+    .bar {
+      height: 8px;
+      border-radius: 999px;
+      background: #dae3ea;
+      overflow: hidden;
+    }
+
+    .bar span {
+      display: block;
+      height: 100%;
+      background: var(--blue);
+    }
+
+    .report {
+      margin: 0;
+      white-space: pre-wrap;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #21303d;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 240px;
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(220px, 1fr));
+      gap: 12px;
+    }
+
+    .compare-item {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      background: #ffffff;
+    }
+
+    .compare-item h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+
+    .run-progress {
+      height: 8px;
+      border-radius: 999px;
+      background: #dce5ed;
+      overflow: hidden;
+      min-width: 180px;
+    }
+
+    .run-progress span {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: var(--green);
+    }
+
+    @media (max-width: 1180px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: static;
+        min-height: auto;
+      }
+
+      .nav {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .sidebar-status {
+        display: none;
+      }
+
+      .workspace,
+      .split {
+        grid-template-columns: 1fr;
+      }
+
+      .config-grid {
+        grid-template-columns: repeat(3, minmax(140px, 1fr));
+      }
+
+      .kpi-grid {
+        grid-template-columns: repeat(4, minmax(120px, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .topbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .toolbar {
+        justify-content: flex-start;
+      }
+
+      .content {
+        padding: 12px;
+      }
+
+      .config-grid,
+      .kpi-grid,
+      .compare-grid,
+      .nav {
+        grid-template-columns: 1fr;
+      }
+
+      .chart-area {
+        min-height: 360px;
+      }
+
+      canvas {
+        height: 360px;
+      }
+
+      .trade-popover {
+        position: static;
+        width: auto;
+        margin: 10px;
+      }
+
+      .data-table {
+        display: block;
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">TB</div>
+        <div>
+          <div>Tradebot</div>
+          <small>Backtesting Spot</small>
+        </div>
+      </div>
+      <nav class="nav" aria-label="Sections">
+        <button class="active" data-scroll="preparation">Preparation</button>
+        <button data-scroll="run">Run</button>
+        <button data-scroll="resultats">Resultats</button>
+        <button data-scroll="trades">Trades</button>
+        <button data-scroll="comparaison">Comparaison</button>
+        <button data-scroll="rapport">Rapport</button>
+      </nav>
+      <div class="sidebar-status">
+        <strong>Mode simulation</strong><br>
+        Aucun ordre reel. Phase 2 avant Signal Engine, Paper Trading et Live.
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="title-block">
+          <h1>Backtesting MTF - BTCUSDC</h1>
+          <p>Run BT-2026-04-30-001 - profil regular - periode 90 jours</p>
+        </div>
+        <div class="toolbar">
+          <button class="btn ghost" id="loadRun">Charger run</button>
+          <button class="btn" id="exportReport">Exporter rapport</button>
+          <button class="btn primary" id="runSample">Relancer simulation</button>
+        </div>
+      </header>
+
+      <section class="content">
+        <section class="band" id="preparation">
+          <div class="band-header">
+            <div>
+              <h2 class="band-title">Preparation et configuration</h2>
+              <p class="band-subtitle">Hypothese Phase 2: validation historique avant tout flux live.</p>
+            </div>
+            <span class="status-pill ok">Donnees exploitables</span>
+          </div>
+          <div class="config-grid">
+            <div class="field">
+              <label for="symbol">Symbole</label>
+              <select id="symbol">
+                <option>BTCUSDC</option>
+                <option>ETHUSDC</option>
+                <option>SOLUSDC</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="period">Periode</label>
+              <select id="period">
+                <option>90 jours</option>
+                <option>180 jours</option>
+                <option>365 jours</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="profile">Profil YAML</label>
+              <select id="profile">
+                <option>regular</option>
+                <option>regular-calibration-a</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="capital">Capital reference</label>
+              <input id="capital" value="10000 USDC">
+            </div>
+            <div class="field">
+              <label for="risk">Risque par trade</label>
+              <input id="risk" value="1.0%">
+            </div>
+            <div class="field">
+              <label for="gate">Mode decision</label>
+              <select id="gate">
+                <option>Gate Phase 2</option>
+                <option>Exploration</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="slippage">Slippage</label>
+              <input id="slippage" value="0.05%">
+            </div>
+            <div class="field">
+              <label for="fees">Frais aller-retour</label>
+              <input id="fees" value="0.20%">
+            </div>
+            <div class="field">
+              <label for="katr">ATR fallback k</label>
+              <input id="katr" value="2.0">
+            </div>
+            <div class="field">
+              <label for="rmultiple">Take-profit R</label>
+              <input id="rmultiple" value="1.5">
+            </div>
+            <div class="field">
+              <label for="stopmax">Stop max</label>
+              <input id="stopmax" value="2.0%">
+            </div>
+            <div class="field">
+              <label for="pivotbuffer">Buffer pivot</label>
+              <input id="pivotbuffer" value="0.30%">
+            </div>
+          </div>
+        </section>
+
+        <section class="workspace" id="run">
+          <div class="band chart-wrap" id="resultats">
+            <div class="band-header">
+              <div>
+                <h2 class="band-title">Graphe du run</h2>
+                <p class="band-subtitle">Chandeliers 5m, entrees, sorties, SL, TP et R du trade selectionne.</p>
+              </div>
+              <div class="chart-tools">
+                <label class="toggle"><input type="checkbox" id="showEma" checked> EMA</label>
+                <label class="toggle"><input type="checkbox" id="showVwap" checked> VWAP</label>
+                <label class="toggle"><input type="checkbox" id="showRisk" checked> SL/TP</label>
+              </div>
+            </div>
+            <div class="chart-area">
+              <canvas id="chart" width="1180" height="460" aria-label="Projection chart"></canvas>
+              <div class="trade-popover" id="tradeDetail"></div>
+            </div>
+          </div>
+
+          <div class="side-panel">
+            <div class="band">
+              <div class="band-header">
+                <div>
+                  <h2 class="band-title">Disponibilite donnees</h2>
+                  <p class="band-subtitle">Couverture et warmup par timeframe.</p>
+                </div>
+              </div>
+              <table class="readiness">
+                <thead>
+                  <tr><th>TF</th><th>Bougies</th><th>Couverture</th><th>Etat</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>4h</td><td>610</td><td>99.4%</td><td><span class="status-pill ok">OK</span></td></tr>
+                  <tr><td>1h</td><td>2 180</td><td>99.7%</td><td><span class="status-pill ok">OK</span></td></tr>
+                  <tr><td>15m</td><td>8 703</td><td>99.2%</td><td><span class="status-pill ok">OK</span></td></tr>
+                  <tr><td>5m</td><td>26 108</td><td>98.9%</td><td><span class="status-pill warn">2 gaps</span></td></tr>
+                  <tr><td>1m</td><td>129 440</td><td>98.5%</td><td><span class="status-pill warn">Backfill</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="band">
+              <div class="band-header">
+                <div>
+                  <h2 class="band-title">Execution du run</h2>
+                  <p class="band-subtitle">Snapshots analyses et statut de simulation.</p>
+                </div>
+                <span class="status-pill ok" id="runState">Completed</span>
+              </div>
+              <div style="padding:14px 16px; display:grid; gap:12px;">
+                <div class="run-progress"><span id="progressBar"></span></div>
+                <div class="kv">
+                  <span>Snapshots 5m</span><strong>26 108</strong>
+                  <span>Signaux valides</span><strong>47</strong>
+                  <span>Trades simules</span><strong>38</strong>
+                  <span>Moteur</span><strong>MTF Validator</strong>
+                  <span>Ordres reels</span><strong>Non</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="kpi-grid">
+          <div class="kpi pass"><span>Verdict Phase 2</span><strong>PASS</strong></div>
+          <div class="kpi"><span>Trades fermes</span><strong>36 / 38</strong></div>
+          <div class="kpi pass"><span>Winrate</span><strong>55.6%</strong></div>
+          <div class="kpi pass"><span>Profit factor</span><strong>1.48</strong></div>
+          <div class="kpi pass"><span>Max drawdown</span><strong>11.8%</strong></div>
+          <div class="kpi"><span>Expectancy</span><strong>+0.18 R</strong></div>
+          <div class="kpi"><span>MFE moyen</span><strong>+2.34%</strong></div>
+          <div class="kpi warn"><span>MAE moyen</span><strong>-0.92%</strong></div>
+        </section>
+
+        <section class="band" id="trades">
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="tradeTable">Trades</button>
+            <button class="tab" data-tab="mtfExplain">Explication MTF</button>
+            <button class="tab" data-tab="compareRuns">Comparaison</button>
+            <button class="tab" data-tab="reportPanel">Rapport</button>
+          </div>
+
+          <div class="tab-panel active" id="tradeTable">
+            <div class="split">
+              <table class="data-table" id="tradesTable">
+                <thead>
+                  <tr>
+                    <th>Trade</th><th>Setup</th><th>Entry</th><th>Exit</th><th>PnL R</th><th>MFE</th><th>MAE</th><th>Sortie</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+              <div class="band" style="box-shadow:none;">
+                <div class="band-header">
+                  <div>
+                    <h2 class="band-title">Focus trade</h2>
+                    <p class="band-subtitle">Detail synchronise avec le graphe.</p>
+                  </div>
+                </div>
+                <div style="padding:14px 16px;" id="focusTrade"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-panel" id="mtfExplain">
+            <div class="split">
+              <div>
+                <h3 style="margin:0 0 10px;">Scores du trade selectionne</h3>
+                <ul class="explain-list" id="mtfList"></ul>
+              </div>
+              <div>
+                <h3 style="margin:0 0 10px;">Rejets agreges</h3>
+                <table class="readiness">
+                  <thead><tr><th>Raison</th><th>Occurrences</th><th>Impact</th></tr></thead>
+                  <tbody>
+                    <tr><td>score_below_threshold</td><td>312</td><td><span class="status-pill warn">Calibration</span></td></tr>
+                    <tr><td>adx_1h_lt_20</td><td>119</td><td><span class="status-pill ok">Filtre utile</span></td></tr>
+                    <tr><td>missing_snapshot_4h</td><td>18</td><td><span class="status-pill fail">Donnees</span></td></tr>
+                    <tr><td>trigger_5m_absent</td><td>481</td><td><span class="status-pill ok">Attente</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-panel" id="compareRuns">
+            <section class="compare-grid" id="comparaison">
+              <div class="compare-item">
+                <h3>BT-001 regular</h3>
+                <div class="kv">
+                  <span>k ATR</span><strong>2.0</strong>
+                  <span>R</span><strong>1.5</strong>
+                  <span>Winrate</span><strong>55.6%</strong>
+                  <span>PF</span><strong class="positive">1.48</strong>
+                  <span>DD</span><strong>11.8%</strong>
+                  <span>Gate</span><strong class="positive">PASS</strong>
+                </div>
+              </div>
+              <div class="compare-item">
+                <h3>BT-002 defensive</h3>
+                <div class="kv">
+                  <span>k ATR</span><strong>2.5</strong>
+                  <span>R</span><strong>1.3</strong>
+                  <span>Winrate</span><strong>58.1%</strong>
+                  <span>PF</span><strong class="positive">1.36</strong>
+                  <span>DD</span><strong>9.4%</strong>
+                  <span>Gate</span><strong class="positive">PASS</strong>
+                </div>
+              </div>
+              <div class="compare-item">
+                <h3>BT-003 aggressive</h3>
+                <div class="kv">
+                  <span>k ATR</span><strong>1.6</strong>
+                  <span>R</span><strong>2.0</strong>
+                  <span>Winrate</span><strong>44.8%</strong>
+                  <span>PF</span><strong class="negative">1.09</strong>
+                  <span>DD</span><strong>18.6%</strong>
+                  <span>Gate</span><strong class="negative">FAIL</strong>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-panel" id="reportPanel">
+            <pre class="report" id="rapport">Run BT-2026-04-30-001
+Symbole: BTCUSDC
+Profil: regular
+Periode: 90 jours
+Decision Phase 2: PASS
+
+Criteres:
+- Winrate 55.6% > 50%: PASS
+- Profit factor 1.48 > 1.3: PASS
+- Max drawdown 11.8% < 15%: PASS
+
+Risques:
+- 2 gaps 5m detectes, non bloquants apres backfill.
+- 2 trades restent ouverts en fin de periode.
+- Le flux runtime doit etre aligne avec le moteur backtest avant Phase 3.
+- PASS historique ne donne pas autorisation live; Phase 5 paper trading reste obligatoire.
+
+Recommendation PO:
+- Continuer calibration defensive sur out-of-sample.
+- Ne pas activer live trading.
+- Preparer visualisation Signal Engine apres convergence des moteurs MTF.</pre>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const candles = [];
+    const trades = [
+      { id: "T-014", setup: "A", entryIndex: 26, exitIndex: 41, entry: 64780, exit: 66110, sl: 63560, tp: 66610, pnl: 1.09, mfe: 2.42, mae: -0.48, reason: "TP", score: 72 },
+      { id: "T-015", setup: "C", entryIndex: 58, exitIndex: 70, entry: 65920, exit: 64890, sl: 64890, tp: 67460, pnl: -1.00, mfe: 0.54, mae: -1.56, reason: "SL", score: 65 },
+      { id: "T-016", setup: "A", entryIndex: 92, exitIndex: 111, entry: 65240, exit: 67080, sl: 64010, tp: 67080, pnl: 1.50, mfe: 2.88, mae: -0.31, reason: "TP", score: 81 },
+      { id: "T-017", setup: "B", entryIndex: 130, exitIndex: 145, entry: 66840, exit: 67540, sl: 65430, tp: 68950, pnl: 0.50, mfe: 1.92, mae: -0.74, reason: "TIME", score: 69 },
+      { id: "T-018", setup: "A", entryIndex: 166, exitIndex: 186, entry: 68120, exit: 70440, sl: 66780, tp: 70130, pnl: 1.73, mfe: 3.21, mae: -0.36, reason: "TP", score: 84 }
+    ];
+    let selectedTradeIndex = 2;
+    const MTF_CONTEXT_SCORES = { "4h": 34, "1h": 24, "15m": 23 };
+    const MTF_CONTEXT_SCORE_TOTAL = Object.values(MTF_CONTEXT_SCORES)
+      .reduce((total, score) => total + score, 0);
+    const NAV_TAB_BY_TARGET = {
+      comparaison: "compareRuns",
+      rapport: "reportPanel"
+    };
+
+    function appendText(parent, tagName, text, className) {
+      const element = document.createElement(tagName);
+      if (className) element.className = className;
+      element.textContent = text;
+      parent.appendChild(element);
+      return element;
+    }
+
+    function appendKv(parent, items) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "kv";
+      items.forEach(item => {
+        appendText(wrapper, "span", item.label);
+        appendText(wrapper, "strong", item.value, item.className);
+      });
+      parent.appendChild(wrapper);
+      return wrapper;
+    }
+
+    function formatPrice(value) {
+      return Number(value).toLocaleString("fr-FR");
+    }
+
+    function formatSignedPercent(value) {
+      return `${value >= 0 ? "+" : ""}${Number(value).toFixed(2)}%`;
+    }
+
+    function seedCandles() {
+      let price = 64200;
+      for (let i = 0; i < 220; i += 1) {
+        const wave = Math.sin(i / 11) * 210 + Math.cos(i / 19) * 160;
+        const trend = i * 21;
+        const open = price;
+        const close = 64200 + wave + trend + Math.sin(i / 3) * 80;
+        const high = Math.max(open, close) + 120 + (i % 7) * 12;
+        const low = Math.min(open, close) - 120 - (i % 5) * 10;
+        candles.push({ open, high, low, close });
+        price = close;
+      }
+    }
+
+    function priceRange() {
+      if (!candles.length) return { min: 0, max: 1000 };
+
+      let min = Infinity;
+      let max = -Infinity;
+      for (const candle of candles) {
+        if (candle.low < min) min = candle.low;
+        if (candle.high > max) max = candle.high;
+      }
+
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        return { min: 0, max: 1000 };
+      }
+      if (min === max) {
+        return { min: min - 500, max: max + 500 };
+      }
+      return { min: min - 500, max: max + 500 };
+    }
+
+    function drawChart() {
+      const canvas = document.getElementById("chart");
+      const ctx = canvas.getContext("2d");
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(rect.width * ratio);
+      canvas.height = Math.floor(rect.height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+      const width = rect.width;
+      const height = rect.height;
+      const pad = { left: 54, right: 18, top: 22, bottom: 34 };
+      const chartW = width - pad.left - pad.right;
+      const chartH = height - pad.top - pad.bottom;
+      const range = priceRange();
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#fbfcfd";
+      ctx.fillRect(0, 0, width, height);
+
+      if (!candles.length || chartW <= 0 || chartH <= 0) {
+        ctx.fillStyle = "#657383";
+        ctx.font = "13px sans-serif";
+        ctx.fillText("Aucune bougie disponible pour cette projection.", pad.left, pad.top + 24);
+        return;
+      }
+
+      const rangeHeight = range.max - range.min || 1;
+      const y = price => pad.top + (range.max - price) / rangeHeight * chartH;
+      const x = index => pad.left + index / Math.max(1, candles.length - 1) * chartW;
+      const candleW = Math.max(3, chartW / Math.max(1, candles.length) * 0.62);
+
+      ctx.strokeStyle = "#e3e9ef";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 5; i += 1) {
+        const gy = pad.top + i * chartH / 5;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, gy);
+        ctx.lineTo(width - pad.right, gy);
+        ctx.stroke();
+        const price = range.max - i * (range.max - range.min) / 5;
+        ctx.fillStyle = "#657383";
+        ctx.font = "12px sans-serif";
+        ctx.fillText(Math.round(price).toString(), 8, gy + 4);
+      }
+
+      if (document.getElementById("showVwap").checked) {
+        ctx.strokeStyle = "#a66a00";
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        candles.forEach((c, i) => {
+          const vwap = c.close - 220 + Math.sin(i / 18) * 120;
+          if (i === 0) ctx.moveTo(x(i), y(vwap));
+          else ctx.lineTo(x(i), y(vwap));
+        });
+        ctx.stroke();
+      }
+
+      if (document.getElementById("showEma").checked) {
+        ctx.strokeStyle = "#2364aa";
+        ctx.lineWidth = 1.7;
+        ctx.beginPath();
+        candles.forEach((c, i) => {
+          const ema = c.close - Math.sin(i / 8) * 150;
+          if (i === 0) ctx.moveTo(x(i), y(ema));
+          else ctx.lineTo(x(i), y(ema));
+        });
+        ctx.stroke();
+      }
+
+      candles.forEach((c, i) => {
+        const up = c.close >= c.open;
+        const cx = x(i);
+        ctx.strokeStyle = up ? "#18805f" : "#b33f3f";
+        ctx.fillStyle = up ? "#18805f" : "#b33f3f";
+        ctx.beginPath();
+        ctx.moveTo(cx, y(c.high));
+        ctx.lineTo(cx, y(c.low));
+        ctx.stroke();
+        const bodyTop = y(Math.max(c.open, c.close));
+        const bodyBottom = y(Math.min(c.open, c.close));
+        ctx.fillRect(cx - candleW / 2, bodyTop, candleW, Math.max(2, bodyBottom - bodyTop));
+      });
+
+      trades.forEach((t, idx) => {
+        const selected = idx === selectedTradeIndex;
+        const entryX = x(t.entryIndex);
+        const exitX = x(t.exitIndex);
+        const entryY = y(t.entry);
+        const exitY = y(t.exit);
+        ctx.strokeStyle = t.pnl >= 0 ? "#18805f" : "#b33f3f";
+        ctx.lineWidth = selected ? 3 : 1.5;
+        ctx.beginPath();
+        ctx.moveTo(entryX, entryY);
+        ctx.lineTo(exitX, exitY);
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = t.pnl >= 0 ? "#18805f" : "#b33f3f";
+        ctx.lineWidth = selected ? 3 : 2;
+        ctx.beginPath();
+        ctx.arc(entryX, entryY, selected ? 6 : 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.rect(exitX - 5, exitY - 5, selected ? 10 : 8, selected ? 10 : 8);
+        ctx.fill();
+        ctx.stroke();
+      });
+
+      const selected = trades[selectedTradeIndex];
+      if (document.getElementById("showRisk").checked && selected) {
+        const x1 = x(selected.entryIndex);
+        const x2 = x(selected.exitIndex);
+        [
+          { label: "SL", price: selected.sl, color: "#b33f3f" },
+          { label: "Entry", price: selected.entry, color: "#2364aa" },
+          { label: "TP", price: selected.tp, color: "#18805f" }
+        ].forEach(line => {
+          ctx.strokeStyle = line.color;
+          ctx.setLineDash([5, 4]);
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(x1, y(line.price));
+          ctx.lineTo(x2, y(line.price));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = line.color;
+          ctx.font = "12px sans-serif";
+          ctx.fillText(line.label, x2 + 8, y(line.price) + 4);
+        });
+      }
+    }
+
+    function renderTradeDetail() {
+      const t = trades[selectedTradeIndex];
+      const cls = t.pnl >= 0 ? "positive" : "negative";
+      const tradeDetail = document.getElementById("tradeDetail");
+      const focusTrade = document.getElementById("focusTrade");
+      tradeDetail.replaceChildren();
+      focusTrade.replaceChildren();
+
+      appendText(tradeDetail, "h3", `${t.id} - Setup ${t.setup}`);
+      appendKv(tradeDetail, [
+        { label: "Score MTF", value: String(t.score) },
+        { label: "Entry", value: formatPrice(t.entry) },
+        { label: "Exit", value: formatPrice(t.exit) },
+        { label: "Stop-loss", value: formatPrice(t.sl) },
+        { label: "Take-profit", value: formatPrice(t.tp) },
+        { label: "PnL", value: `${t.pnl.toFixed(2)} R`, className: cls }
+      ]);
+
+      appendKv(focusTrade, [
+        { label: "Trade", value: t.id },
+        { label: "Setup", value: t.setup },
+        { label: "Raison sortie", value: t.reason },
+        { label: "MFE", value: formatSignedPercent(t.mfe), className: "positive" },
+        { label: "MAE", value: formatSignedPercent(t.mae), className: "negative" },
+        { label: "Regle meme bougie", value: "Pessimiste SL avant TP" }
+      ]);
+    }
+
+    function renderTradesTable() {
+      const tbody = document.querySelector("#tradesTable tbody");
+      tbody.replaceChildren();
+      trades.forEach((t, idx) => {
+        const row = document.createElement("tr");
+        if (idx === selectedTradeIndex) row.classList.add("selected");
+        appendText(row, "td", t.id);
+        appendText(row, "td", t.setup);
+        appendText(row, "td", formatPrice(t.entry));
+        appendText(row, "td", formatPrice(t.exit));
+        appendText(row, "td", t.pnl.toFixed(2), t.pnl >= 0 ? "positive" : "negative");
+        appendText(row, "td", formatSignedPercent(t.mfe), "positive");
+        appendText(row, "td", formatSignedPercent(t.mae), "negative");
+        appendText(row, "td", t.reason);
+        row.addEventListener("click", () => {
+          selectedTradeIndex = idx;
+          renderAll();
+        });
+        tbody.appendChild(row);
+      });
+    }
+
+    function renderMtf() {
+      const t = trades[selectedTradeIndex];
+      const triggerScore = Math.max(0, t.score - MTF_CONTEXT_SCORE_TOTAL);
+      const rows = [
+        ["4h", MTF_CONTEXT_SCORES["4h"], "Trend EMA + RSI"],
+        ["1h", MTF_CONTEXT_SCORES["1h"], "ADX + MACD"],
+        ["15m", MTF_CONTEXT_SCORES["15m"], "Structure pullback"],
+        ["5m", triggerScore, "Trigger close"]
+      ];
+      const list = document.getElementById("mtfList");
+      list.replaceChildren();
+      rows.forEach(([tf, score, label]) => {
+        const item = document.createElement("li");
+        appendText(item, "strong", tf);
+
+        const detail = document.createElement("div");
+        const bar = document.createElement("div");
+        const fill = document.createElement("span");
+        const width = Math.min(100, Math.max(10, Number(score) * 2));
+        bar.className = "bar";
+        fill.style.width = `${width}%`;
+        bar.appendChild(fill);
+        detail.appendChild(bar);
+        appendText(detail, "small", label);
+
+        item.appendChild(detail);
+        appendText(item, "span", `${score} pts`);
+        list.appendChild(item);
+      });
+    }
+
+    function renderAll() {
+      drawChart();
+      renderTradeDetail();
+      renderTradesTable();
+      renderMtf();
+    }
+
+    function attachHandlers() {
+      document.querySelectorAll(".tab").forEach(button => {
+        button.addEventListener("click", () => {
+          setActiveTab(button.dataset.tab);
+        });
+      });
+
+      document.querySelectorAll(".nav button").forEach(button => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll(".nav button").forEach(b => b.classList.remove("active"));
+          button.classList.add("active");
+          scrollToTarget(button.dataset.scroll);
+        });
+      });
+
+      ["showEma", "showVwap", "showRisk"].forEach(id => {
+        document.getElementById(id).addEventListener("change", drawChart);
+      });
+
+      document.getElementById("runSample").addEventListener("click", () => {
+        const state = document.getElementById("runState");
+        const progress = document.getElementById("progressBar");
+        state.textContent = "Running";
+        state.className = "status-pill warn";
+        progress.style.width = "38%";
+        setTimeout(() => {
+          progress.style.width = "100%";
+          state.textContent = "Completed";
+          state.className = "status-pill ok";
+        }, 700);
+      });
+
+      document.getElementById("exportReport").addEventListener("click", () => {
+        setActiveTab("reportPanel");
+        requestAnimationFrame(() => document.getElementById("rapport").focus());
+      });
+
+      window.addEventListener("resize", drawChart);
+    }
+
+    function setActiveTab(tabId) {
+      const tab = document.querySelector(`[data-tab="${tabId}"]`);
+      const panel = document.getElementById(tabId);
+      if (!tab || !panel) return;
+
+      document.querySelectorAll(".tab").forEach(button => button.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(item => item.classList.remove("active"));
+      tab.classList.add("active");
+      panel.classList.add("active");
+    }
+
+    function scrollToTarget(targetId) {
+      const tabId = NAV_TAB_BY_TARGET[targetId];
+      if (tabId) setActiveTab(tabId);
+
+      requestAnimationFrame(() => {
+        const target = document.getElementById(targetId);
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+
+    seedCandles();
+    attachHandlers();
+    renderAll();
+  </script>
+</body>
+</html>

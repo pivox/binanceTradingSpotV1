@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session
 from tradebot.infra.db.repositories.candle_repo_sql import CandleRepoSql
 from tradebot.infra.db.repositories.snapshot_repo_sql import SnapshotRepoSql
 from tradebot.services.backtesting.metrics import compute_metrics
-from tradebot.services.backtesting.models import BacktestConfig, BacktestResult, BacktestTrade
+from tradebot.services.backtesting.models import (
+    BacktestConfig,
+    BacktestResult,
+    BacktestTrade,
+)
 from tradebot.services.backtesting.trade_simulator import compute_sl_tp, simulate_exit
 from tradebot.services.mtf.validator import load_profile, validate
 
@@ -65,8 +69,7 @@ class BacktestEngine:
 
         # Only evaluate signals within the requested window
         snaps_5m = [
-            (t, p) for t, p in snaps_by_tf.get(trigger_tf, [])
-            if from_ms <= t <= to_ms
+            (t, p) for t, p in snaps_by_tf.get(trigger_tf, []) if from_ms <= t <= to_ms
         ]
 
         candles_5m = self._candle_repo.fetch_range(
@@ -118,22 +121,24 @@ class BacktestEngine:
             if exit_reason in ("TP", "SL") and exit_price is not None and dist_sl > 0:
                 pnl_r = (exit_price - entry_price) / dist_sl
 
-            trades.append(BacktestTrade(
-                symbol=symbol,
-                entry_time_ms=close_time_ms,
-                entry_price=entry_price,
-                stop_loss=sl,
-                take_profit=tp,
-                sl_method=sl_method,
-                exit_time_ms=exit_time_ms,
-                exit_price=exit_price,
-                exit_reason=exit_reason,
-                pnl_r=pnl_r,
-                mfe_pct=mfe_pct,
-                mae_pct=mae_pct,
-                signal_score=signal.score,
-                signal_context=signal.context_json,
-            ))
+            trades.append(
+                BacktestTrade(
+                    symbol=symbol,
+                    entry_time_ms=close_time_ms,
+                    entry_price=entry_price,
+                    stop_loss=sl,
+                    take_profit=tp,
+                    sl_method=sl_method,
+                    exit_time_ms=exit_time_ms,
+                    exit_price=exit_price,
+                    exit_reason=exit_reason,
+                    pnl_r=pnl_r,
+                    mfe_pct=mfe_pct,
+                    mae_pct=mae_pct,
+                    signal_score=signal.score,
+                    signal_context=signal.context_json,
+                )
+            )
 
         metrics = compute_metrics(trades, config.risk_pct)
         return BacktestResult(

@@ -798,7 +798,9 @@ def create_app(settings: Settings) -> web.Application:
             return _json_err("invalid_request", "invalid JSON payload", status=400)
 
         if not isinstance(body, dict):
-            return _json_err("invalid_request", "request body must be a JSON object", status=400)
+            return _json_err(
+                "invalid_request", "request body must be a JSON object", status=400
+            )
 
         raw_symbol = body.get("symbol")
         symbol = str(raw_symbol or "").strip().upper()
@@ -840,7 +842,9 @@ def create_app(settings: Settings) -> web.Application:
                 session.commit()
         except RuntimeError as exc:
             log.error("chart_gap_request_error", error=str(exc))
-            return _json_err("service_unavailable", "database session is unavailable", status=503)
+            return _json_err(
+                "service_unavailable", "database session is unavailable", status=503
+            )
         except SQLAlchemyError:
             log.exception("chart_gap_request_error")
             return _json_err("db_error", "failed to store gap request")
@@ -1081,7 +1085,15 @@ def create_app(settings: Settings) -> web.Application:
     async def chart_handler(_request: web.Request) -> web.FileResponse:
         return web.FileResponse(static_dir / "chart.html")
 
+    async def backtesting_handler(_request: web.Request) -> web.FileResponse:
+        return web.FileResponse(static_dir / "backtesting.html")
+
     app.router.add_get("/", index_handler)
     app.router.add_get("/chart", chart_handler)
+    app.router.add_get("/backtesting", backtesting_handler)
     app.router.add_static("/static/", static_dir)
+
+    from tradebot.api.backtesting_routes import register_backtesting_routes
+
+    register_backtesting_routes(app)
     return app

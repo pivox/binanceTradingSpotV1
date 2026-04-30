@@ -3,6 +3,7 @@
 Full engine integration is tested with a real DB in tests/integration/.
 Here we test the pure algorithmic helper _find_as_of.
 """
+
 from __future__ import annotations
 
 import pytest

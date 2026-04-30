@@ -27,9 +27,13 @@ def exit_plan_to_json(plan: ExitPlan) -> str:
                 },
                 "quantity": str(lot.quantity),
                 "is_filled": lot.is_filled,
-                "fill_price": str(lot.fill_price) if lot.fill_price is not None else None,
+                "fill_price": str(lot.fill_price)
+                if lot.fill_price is not None
+                else None,
                 "fill_time_ms": lot.fill_time_ms,
-                "current_trailing": str(lot.current_trailing) if lot.current_trailing is not None else None,
+                "current_trailing": str(lot.current_trailing)
+                if lot.current_trailing is not None
+                else None,
                 "binance_order_id": lot.binance_order_id,
             }
             for lot in plan.lots
@@ -56,7 +60,9 @@ def exit_plan_from_json(raw: str) -> ExitPlan:
             is_filled=d["is_filled"],
             fill_price=Decimal(d["fill_price"]) if d.get("fill_price") else None,
             fill_time_ms=d.get("fill_time_ms"),
-            current_trailing=Decimal(d["current_trailing"]) if d.get("current_trailing") else None,
+            current_trailing=Decimal(d["current_trailing"])
+            if d.get("current_trailing")
+            else None,
             binance_order_id=d.get("binance_order_id"),
         )
         lots.append(lot)

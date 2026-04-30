@@ -1,4 +1,5 @@
 """Unit tests — BacktestMetrics computation (Phase 2)."""
+
 from __future__ import annotations
 
 import pytest
@@ -21,7 +22,9 @@ def _trade(
         take_profit=51_500.0,
         sl_method="PIVOT",
         exit_time_ms=2_000_000 if exit_reason != "OPEN" else None,
-        exit_price=(51_500.0 if pnl_r and pnl_r > 0 else 49_000.0) if exit_reason != "OPEN" else None,
+        exit_price=(51_500.0 if pnl_r and pnl_r > 0 else 49_000.0)
+        if exit_reason != "OPEN"
+        else None,
         exit_reason=exit_reason,  # type: ignore[arg-type]
         pnl_r=pnl_r,
         mfe_pct=mfe,
@@ -77,7 +80,9 @@ class TestComputeMetrics:
 
     def test_max_drawdown_sequential_losses(self):
         # 5 losses then 5 wins → peak drawdown = 5R × 1% = 5%
-        trades = [_trade(-1.0, "SL") for _ in range(5)] + [_trade(1.5, "TP") for _ in range(5)]
+        trades = [_trade(-1.0, "SL") for _ in range(5)] + [
+            _trade(1.5, "TP") for _ in range(5)
+        ]
         m = compute_metrics(trades, risk_pct=0.01)
         assert m.max_drawdown_pct == pytest.approx(5.0)
 
@@ -111,7 +116,9 @@ class TestComputeMetrics:
 
     def test_gate_fails_drawdown_above_15(self):
         # 16 consecutive losses × 1% risk = 16% drawdown
-        trades = [_trade(-1.0, "SL") for _ in range(16)] + [_trade(1.5, "TP") for _ in range(20)]
+        trades = [_trade(-1.0, "SL") for _ in range(16)] + [
+            _trade(1.5, "TP") for _ in range(20)
+        ]
         m = compute_metrics(trades, risk_pct=0.01)
         assert m.max_drawdown_pct >= 15.0
         assert m.passes_phase_gate is False
@@ -127,3 +134,64 @@ class TestComputeMetrics:
         m = compute_metrics(trades)
         assert m.total_trades == 5
         assert m.closed_trades == 3
+
+
+class TestVerdict:
+    def test_inconclusive_below_min(self):
+        from tradebot.services.backtesting.models import Verdict
+
+        trades = [_trade(1.5, "TP") for _ in range(10)]
+        m = compute_metrics(trades, min_closed_trades=20)
+        assert m.verdict == Verdict.INCONCLUSIVE
+        assert len(m.verdict_reasons) == 1
+        assert "10" in m.verdict_reasons[0]
+
+    def test_inconclusive_empty(self):
+        from tradebot.services.backtesting.models import Verdict
+
+        m = compute_metrics([], min_closed_trades=20)
+        assert m.verdict == Verdict.INCONCLUSIVE
+
+    def test_pass_when_all_criteria_met(self):
+        from tradebot.services.backtesting.models import Verdict
+
+        wins = [_trade(1.5, "TP") for _ in range(14)]
+        losses = [_trade(-1.0, "SL") for _ in range(6)]
+        m = compute_metrics(wins + losses, min_closed_trades=20)
+        assert m.verdict == Verdict.PASS
+        assert m.verdict_reasons == []
+
+    def test_fail_low_winrate(self):
+        from tradebot.services.backtesting.models import Verdict
+
+        wins = [_trade(1.5, "TP") for _ in range(8)]
+        losses = [_trade(-1.0, "SL") for _ in range(12)]
+        m = compute_metrics(wins + losses, min_closed_trades=20)
+        assert m.verdict == Verdict.FAIL
+        assert any("winrate" in r.lower() or "Winrate" in r for r in m.verdict_reasons)
+
+    def test_fail_low_profit_factor(self):
+        from tradebot.services.backtesting.models import Verdict
+
+        wins = [_trade(0.9, "TP") for _ in range(51)]
+        losses = [_trade(-1.0, "SL") for _ in range(49)]
+        m = compute_metrics(wins + losses, min_closed_trades=20)
+        assert m.verdict == Verdict.FAIL
+        assert any("factor" in r.lower() or "Factor" in r for r in m.verdict_reasons)
+
+    def test_fail_high_drawdown(self):
+        from tradebot.services.backtesting.models import Verdict
+
+        losses = [_trade(-1.0, "SL") for _ in range(16)]
+        wins = [_trade(1.5, "TP") for _ in range(20)]
+        m = compute_metrics(losses + wins, risk_pct=0.01, min_closed_trades=20)
+        assert m.verdict == Verdict.FAIL
+        assert any(
+            "drawdown" in r.lower() or "Drawdown" in r for r in m.verdict_reasons
+        )
+
+    def test_passes_phase_gate_still_set(self):
+        wins = [_trade(1.5, "TP") for _ in range(14)]
+        losses = [_trade(-1.0, "SL") for _ in range(6)]
+        m = compute_metrics(wins + losses, min_closed_trades=20)
+        assert m.passes_phase_gate is True

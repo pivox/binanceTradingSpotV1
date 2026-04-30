@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from tradebot.services.backtesting.models import BacktestMetrics, BacktestTrade
+from tradebot.services.backtesting.models import BacktestMetrics, BacktestTrade, Verdict
 
 
-def compute_metrics(trades: list[BacktestTrade], risk_pct: float = 0.01) -> BacktestMetrics:
-    """
-    Compute aggregate backtest metrics from a list of trades.
-
-    Drawdown is expressed as % of capital using risk_pct to convert R to %.
-    Phase gate: winrate > 50%, profit_factor > 1.3, max_drawdown_pct < 15%.
-    """
-    closed = [t for t in trades if t.exit_reason in ("TP", "SL") and t.pnl_r is not None]
+def compute_metrics(
+    trades: list[BacktestTrade],
+    risk_pct: float = 0.01,
+    min_closed_trades: int = 20,
+) -> BacktestMetrics:
+    closed = [
+        t for t in trades if t.exit_reason in ("TP", "SL") and t.pnl_r is not None
+    ]
 
     if not closed:
         return BacktestMetrics(
@@ -24,6 +24,8 @@ def compute_metrics(trades: list[BacktestTrade], risk_pct: float = 0.01) -> Back
             avg_mfe_pct=0.0,
             avg_mae_pct=0.0,
             passes_phase_gate=False,
+            verdict=Verdict.INCONCLUSIVE,
+            verdict_reasons=[f"Not enough closed trades: 0 < {min_closed_trades}"],
         )
 
     winners = [t for t in closed if t.pnl_r > 0]  # type: ignore[operator]
@@ -51,6 +53,26 @@ def compute_metrics(trades: list[BacktestTrade], risk_pct: float = 0.01) -> Back
 
     passes = winrate > 0.50 and profit_factor > 1.3 and max_drawdown_pct < 15.0
 
+    if len(closed) < min_closed_trades:
+        verdict = Verdict.INCONCLUSIVE
+        verdict_reasons = [
+            f"Not enough closed trades: {len(closed)} < {min_closed_trades}"
+        ]
+    elif passes:
+        verdict = Verdict.PASS
+        verdict_reasons = []
+    else:
+        verdict = Verdict.FAIL
+        verdict_reasons = []
+        if winrate <= 0.50:
+            verdict_reasons.append(f"Winrate too low: {winrate * 100:.1f}% <= 50%")
+        if profit_factor <= 1.3:
+            verdict_reasons.append(f"Profit factor too low: {profit_factor:.2f} <= 1.3")
+        if max_drawdown_pct >= 15.0:
+            verdict_reasons.append(
+                f"Max drawdown too high: {max_drawdown_pct:.1f}% >= 15%"
+            )
+
     return BacktestMetrics(
         total_trades=len(trades),
         closed_trades=len(closed),
@@ -62,4 +84,6 @@ def compute_metrics(trades: list[BacktestTrade], risk_pct: float = 0.01) -> Back
         avg_mfe_pct=avg_mfe,
         avg_mae_pct=avg_mae,
         passes_phase_gate=passes,
+        verdict=verdict,
+        verdict_reasons=verdict_reasons,
     )

@@ -75,11 +75,15 @@ class CandleRepoSql:
         return [_row_to_candle(r) for r in rows]
 
     def fetch_symbols_with_timeframe(self, timeframe: str) -> list[str]:
-        rows = self._session.execute(
-            select(CandleModel.symbol)
-            .where(CandleModel.timeframe == timeframe)
-            .distinct()
-        ).scalars().all()
+        rows = (
+            self._session.execute(
+                select(CandleModel.symbol)
+                .where(CandleModel.timeframe == timeframe)
+                .distinct()
+            )
+            .scalars()
+            .all()
+        )
         return list(rows)
 
     def get_last_close_time(self, symbol: str, timeframe: str) -> int | None:

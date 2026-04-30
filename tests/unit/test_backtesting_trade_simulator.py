@@ -1,4 +1,5 @@
 """Unit tests — SL/TP computation and exit simulation (Phase 2)."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -117,7 +118,9 @@ class TestComputeSlTp:
             assert method == "ATR_FALLBACK"
 
     def test_tp_ratio(self):
-        sl, tp, method = compute_sl_tp(50_000.0, _snap(), BacktestConfig(r_multiple=2.0))
+        sl, tp, method = compute_sl_tp(
+            50_000.0, _snap(), BacktestConfig(r_multiple=2.0)
+        )
         dist = 50_000.0 - sl
         assert tp == pytest.approx(50_000.0 + dist * 2.0, rel=1e-6)
 
@@ -125,19 +128,23 @@ class TestComputeSlTp:
 class TestSimulateExit:
     def test_tp_hit(self):
         candles = [
-            _candle(1000, high=50_800.0, low=49_700.0),   # TP@51_500 not reached
-            _candle(2000, high=51_600.0, low=50_000.0),   # TP hit
+            _candle(1000, high=50_800.0, low=49_700.0),  # TP@51_500 not reached
+            _candle(2000, high=51_600.0, low=50_000.0),  # TP hit
         ]
-        _, exit_price, reason, _, _ = simulate_exit(50_000.0, 49_000.0, 51_500.0, candles)
+        _, exit_price, reason, _, _ = simulate_exit(
+            50_000.0, 49_000.0, 51_500.0, candles
+        )
         assert reason == "TP"
         assert exit_price == pytest.approx(51_500.0)
 
     def test_sl_hit(self):
         candles = [
-            _candle(1000, high=50_200.0, low=49_100.0),   # SL@49_000 not reached
-            _candle(2000, high=49_600.0, low=48_800.0),   # SL hit
+            _candle(1000, high=50_200.0, low=49_100.0),  # SL@49_000 not reached
+            _candle(2000, high=49_600.0, low=48_800.0),  # SL hit
         ]
-        _, exit_price, reason, _, _ = simulate_exit(50_000.0, 49_000.0, 51_500.0, candles)
+        _, exit_price, reason, _, _ = simulate_exit(
+            50_000.0, 49_000.0, 51_500.0, candles
+        )
         assert reason == "SL"
         assert exit_price == pytest.approx(49_000.0)
 
@@ -149,13 +156,17 @@ class TestSimulateExit:
 
     def test_open_trade(self):
         candles = [_candle(1000, high=50_500.0, low=49_600.0)]
-        exit_ms, exit_price, reason, _, _ = simulate_exit(50_000.0, 49_000.0, 51_500.0, candles)
+        exit_ms, exit_price, reason, _, _ = simulate_exit(
+            50_000.0, 49_000.0, 51_500.0, candles
+        )
         assert reason == "OPEN"
         assert exit_ms is None
         assert exit_price is None
 
     def test_no_candles(self):
-        exit_ms, exit_price, reason, mfe, mae = simulate_exit(50_000.0, 49_000.0, 51_500.0, [])
+        exit_ms, exit_price, reason, mfe, mae = simulate_exit(
+            50_000.0, 49_000.0, 51_500.0, []
+        )
         assert reason == "OPEN"
         assert mfe == 0.0
         assert mae == 0.0
@@ -179,27 +190,43 @@ class TestSimulateExit:
         candle = _candle(1000, high=49_100.0, low=48_700.0, close=48_800.0)
         # Override open to gap below SL
         from decimal import Decimal
+
         gap_candle = Candle(
-            symbol="BTCUSDC", timeframe="5m",
-            open_time_ms=1000, close_time_ms=1000 + 5 * 60 * 1_000 - 1,
-            open=Decimal("48_800.0"), high=Decimal("49_100.0"),
-            low=Decimal("48_700.0"), close=Decimal("48_800.0"),
-            volume=Decimal("10.0"), is_partial=False,
+            symbol="BTCUSDC",
+            timeframe="5m",
+            open_time_ms=1000,
+            close_time_ms=1000 + 5 * 60 * 1_000 - 1,
+            open=Decimal("48_800.0"),
+            high=Decimal("49_100.0"),
+            low=Decimal("48_700.0"),
+            close=Decimal("48_800.0"),
+            volume=Decimal("10.0"),
+            is_partial=False,
         )
-        _, exit_price, reason, _, _ = simulate_exit(50_000.0, 49_000.0, 51_500.0, [gap_candle])
+        _, exit_price, reason, _, _ = simulate_exit(
+            50_000.0, 49_000.0, 51_500.0, [gap_candle]
+        )
         assert reason == "SL"
         assert exit_price == pytest.approx(48_800.0)  # at open, not 49_000
 
     def test_tp_gap_exit_at_open_price(self):
         # Candle opens above TP (gap up) → exit at open, not at take_profit
         from decimal import Decimal
+
         gap_candle = Candle(
-            symbol="BTCUSDC", timeframe="5m",
-            open_time_ms=1000, close_time_ms=1000 + 5 * 60 * 1_000 - 1,
-            open=Decimal("52_000.0"), high=Decimal("52_500.0"),
-            low=Decimal("51_800.0"), close=Decimal("52_000.0"),
-            volume=Decimal("10.0"), is_partial=False,
+            symbol="BTCUSDC",
+            timeframe="5m",
+            open_time_ms=1000,
+            close_time_ms=1000 + 5 * 60 * 1_000 - 1,
+            open=Decimal("52_000.0"),
+            high=Decimal("52_500.0"),
+            low=Decimal("51_800.0"),
+            close=Decimal("52_000.0"),
+            volume=Decimal("10.0"),
+            is_partial=False,
         )
-        _, exit_price, reason, _, _ = simulate_exit(50_000.0, 49_000.0, 51_500.0, [gap_candle])
+        _, exit_price, reason, _, _ = simulate_exit(
+            50_000.0, 49_000.0, 51_500.0, [gap_candle]
+        )
         assert reason == "TP"
         assert exit_price == pytest.approx(52_000.0)  # at open, not 51_500

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Backtesting</title>
+    <link rel="stylesheet" href="/static/backtesting.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <!-- Header -->
+      <div class="page-header">
+        <div class="title">Backtesting</div>
+        <div style="display:flex;gap:8px">
+          <a class="nav-link" href="/">Daemon Control</a>
+          <a class="nav-link" href="/chart">Chart</a>
+        </div>
+      </div>
+
+      <!-- Section 1: Preparation -->
+      <div class="card">
+        <div class="section-title">1. Preparation des donnees</div>
+        <div class="form-row">
+          <div class="field">
+            <label for="prepSymbol">Symbol</label>
+            <input id="prepSymbol" type="text" placeholder="BTCUSDC" value="BTCUSDC" />
+          </div>
+          <div class="field">
+            <label for="prepFromDate">Date debut</label>
+            <input id="prepFromDate" type="date" />
+          </div>
+          <div class="field">
+            <label for="prepToDate">Date fin</label>
+            <input id="prepToDate" type="date" />
+          </div>
+          <div class="field">
+            <label for="prepProfile">Profil</label>
+            <select id="prepProfile">
+              <option value="regular">regular</option>
+            </select>
+          </div>
+          <div class="field" style="justify-content:flex-end">
+            <button class="accent2" id="btnCheckReadiness">Verifier donnees</button>
+          </div>
+        </div>
+        <div class="feedback" id="readinessFeedback"></div>
+        <div id="readinessResult" style="display:none;margin-top:12px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <span id="readinessStatusBadge" class="status-badge"></span>
+            <span id="readinessWarmup" style="font-size:12px"></span>
+          </div>
+          <ul class="reasons-list" id="readinessReasons"></ul>
+          <table class="coverage-table">
+            <thead>
+              <tr>
+                <th>Timeframe</th>
+                <th>Candles</th>
+                <th>Couverture</th>
+                <th>Gaps</th>
+                <th>Snapshots</th>
+                <th>Statut</th>
+              </tr>
+            </thead>
+            <tbody id="coverageBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Section 2: Configuration Run -->
+      <div class="card">
+        <div class="section-title">2. Configuration et lancement</div>
+        <div class="form-row" style="margin-bottom:10px">
+          <div class="field">
+            <label for="cfgSlippage">Slippage %</label>
+            <input id="cfgSlippage" type="number" step="0.0001" value="0.0005" />
+          </div>
+          <div class="field">
+            <label for="cfgFees">Fees %</label>
+            <input id="cfgFees" type="number" step="0.0001" value="0.001" />
+          </div>
+          <div class="field">
+            <label for="cfgKAtr">k_atr</label>
+            <input id="cfgKAtr" type="number" step="0.1" value="2.0" />
+          </div>
+          <div class="field">
+            <label for="cfgRMultiple">r_multiple</label>
+            <input id="cfgRMultiple" type="number" step="0.1" value="1.5" />
+          </div>
+          <div class="field">
+            <label for="cfgMaxSl">max_sl_pct</label>
+            <input id="cfgMaxSl" type="number" step="0.001" value="0.02" />
+          </div>
+          <div class="field">
+            <label for="cfgSlBuffer">sl_buffer_pct</label>
+            <input id="cfgSlBuffer" type="number" step="0.001" value="0.003" />
+          </div>
+          <div class="field">
+            <label for="cfgRisk">risk_pct</label>
+            <input id="cfgRisk" type="number" step="0.001" value="0.01" />
+          </div>
+          <div class="field">
+            <label for="cfgCapital">Capital USDC</label>
+            <input id="cfgCapital" type="number" step="100" value="10000" />
+          </div>
+          <div class="field">
+            <label for="cfgMinClosed">min_closed_trades</label>
+            <input id="cfgMinClosed" type="number" step="1" value="20" />
+          </div>
+          <div class="field">
+            <label for="cfgMode">Mode</label>
+            <select id="cfgMode">
+              <option value="exploration">exploration</option>
+              <option value="phase_gate">phase_gate</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <button class="primary" id="btnLaunchRun">Lancer backtest</button>
+          <div class="feedback" id="runFeedback" style="margin-top:0"></div>
+        </div>
+      </div>
+
+      <!-- Section 3: Resultats -->
+      <div class="card" id="resultsSection" style="display:none">
+        <div class="section-title">3. Resultats</div>
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap">
+          <span id="verdictBadge" class="verdict-badge"></span>
+          <ul class="reasons-list" id="verdictReasons" style="margin:0"></ul>
+        </div>
+        <div class="kpi-grid" id="kpiGrid"></div>
+      </div>
+
+      <!-- Section 4: Graphe -->
+      <div class="card" id="chartSection" style="display:none">
+        <div class="section-title">4. Graphe</div>
+        <canvas id="chartCanvas"></canvas>
+      </div>
+
+      <!-- Section 5: Trades -->
+      <div class="card" id="tradesSection" style="display:none">
+        <div class="section-title">5. Trades</div>
+        <div class="filters-row">
+          <div class="field">
+            <label for="filterResult">Resultat</label>
+            <select id="filterResult">
+              <option value="">Tous</option>
+              <option value="win">Gagnant</option>
+              <option value="loss">Perdant</option>
+              <option value="open">Ouvert</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="filterReason">Raison</label>
+            <select id="filterReason">
+              <option value="">Toutes</option>
+              <option value="TP">TP</option>
+              <option value="SL">SL</option>
+              <option value="OPEN">OPEN</option>
+            </select>
+          </div>
+          <button class="secondary" id="btnFilterTrades" style="margin-top:auto">Filtrer</button>
+        </div>
+        <div class="trades-table-wrap">
+          <table class="trades-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Entree (ms)</th>
+                <th>Prix entree</th>
+                <th>SL</th>
+                <th>TP</th>
+                <th>Methode SL</th>
+                <th>Sortie</th>
+                <th>PnL R</th>
+                <th>MFE%</th>
+                <th>MAE%</th>
+              </tr>
+            </thead>
+            <tbody id="tradesBody"></tbody>
+          </table>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="secondary" id="btnPrevTrades" disabled>Precedent</button>
+          <button class="secondary" id="btnNextTrades" disabled>Suivant</button>
+        </div>
+      </div>
+
+      <!-- Section 6: MTF Contexte -->
+      <div class="card" id="mtfSection" style="display:none">
+        <div class="section-title">6. Contexte MTF du trade selectionne</div>
+        <pre id="mtfContext"></pre>
+      </div>
+
+      <!-- Section 7: Rapport -->
+      <div class="card" id="reportSection" style="display:none">
+        <div class="section-title">7. Rapport</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <button class="secondary" id="btnReportJson">JSON</button>
+          <button class="secondary" id="btnReportMarkdown">Markdown</button>
+        </div>
+        <pre id="reportOutput"></pre>
+      </div>
+
+      <!-- Section: Historique runs -->
+      <div class="card">
+        <div class="section-title">Historique des runs</div>
+        <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;flex-wrap:wrap">
+          <div class="field">
+            <label for="histSymbol">Symbol (optionnel)</label>
+            <input id="histSymbol" type="text" placeholder="BTCUSDC" />
+          </div>
+          <button class="secondary" id="btnLoadRuns">Charger</button>
+        </div>
+        <div id="runsList" class="runs-list"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="secondary" id="btnPrevRuns" disabled>Precedent</button>
+          <button class="secondary" id="btnNextRuns" disabled>Suivant</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/backtesting.js"></script>
+  </body>
+</html>
